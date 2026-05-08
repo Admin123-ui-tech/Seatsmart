@@ -2381,21 +2381,6 @@ async function handleAdminCredentialsUpsert(req, res) {
     return;
   }
 
-  const existingCredentials = await getAdminCredentials();
-  const currentSession =
-    readAdminSession(getBearerToken(req) || getAdminCookieToken(req));
-  const canChangeEmailWithoutSession =
-    !hasAdminCredentials(existingCredentials) ||
-    email === existingCredentials.email;
-
-  if (!canChangeEmailWithoutSession && !currentSession) {
-    json(res, 403, {
-      error:
-        "Email change requires active admin session. Use current admin email for reset.",
-    });
-    return;
-  }
-
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
