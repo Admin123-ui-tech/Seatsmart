@@ -117,6 +117,9 @@ const STUDENT_PROFILE_UPSERT_RATE_LIMIT_MAX = Math.max(
   Number(process.env.STUDENT_PROFILE_UPSERT_RATE_LIMIT_MAX || 20),
 );
 const rateLimitStore = new Map();
+let collegesColumnsPromise = null;
+let examCentersColumnsPromise = null;
+let roomsColumnsPromise = null;
 
 function buildCorsHeaders(req) {
   const origin = safeText(req?.headers?.origin);
@@ -194,6 +197,121 @@ function normalizeType(value, fallback = "school") {
 function normalizeUuid(value) {
   const id = safeText(value);
   return id || null;
+}
+
+async function getCollegesColumns() {
+  if (!collegesColumnsPromise) {
+    collegesColumnsPromise = pool
+      .query(
+        `SELECT column_name
+         FROM information_schema.columns
+         WHERE table_schema = 'public' AND table_name = 'colleges'`,
+      )
+      .then((result) =>
+        new Set(
+          (result.rows || []).map((row) =>
+            safeText(row.column_name).toLowerCase(),
+          ),
+        ),
+      )
+      .catch((error) => {
+        collegesColumnsPromise = null;
+        throw error;
+      });
+  }
+  return collegesColumnsPromise;
+}
+
+async function getExamCentersColumns() {
+  if (!examCentersColumnsPromise) {
+    examCentersColumnsPromise = pool
+      .query(
+        `SELECT column_name
+         FROM information_schema.columns
+         WHERE table_schema = 'public' AND table_name = 'exam_centers'`,
+      )
+      .then((result) =>
+        new Set(
+          (result.rows || []).map((row) =>
+            safeText(row.column_name).toLowerCase(),
+          ),
+        ),
+      )
+      .catch((error) => {
+        examCentersColumnsPromise = null;
+        throw error;
+      });
+  }
+  return examCentersColumnsPromise;
+}
+
+async function getRoomsColumns() {
+  if (!roomsColumnsPromise) {
+    roomsColumnsPromise = pool
+      .query(
+        `SELECT column_name
+         FROM information_schema.columns
+         WHERE table_schema = 'public' AND table_name = 'rooms'`,
+      )
+      .then((result) =>
+        new Set(
+          (result.rows || []).map((row) =>
+            safeText(row.column_name).toLowerCase(),
+          ),
+        ),
+      )
+      .catch((error) => {
+        roomsColumnsPromise = null;
+        throw error;
+      });
+  }
+  return roomsColumnsPromise;
+}
+
+function mapDatabaseError(error, fallbackMessage) {
+  const code = safeText(error?.code);
+  const constraint = safeText(error?.constraint).toLowerCase();
+  const column = safeText(error?.column);
+
+  if (code === "23505") {
+    if (constraint.includes("code")) {
+      return {
+        status: 409,
+        message: "Code already exists. Please use a unique code.",
+      };
+    }
+    return {
+      status: 409,
+      message: "Duplicate value found. Please check and try again.",
+    };
+  }
+
+  if (code === "23502") {
+    const field = column ? column.replace(/_/g, " ") : "required field";
+    return {
+      status: 400,
+      message: `${field} is required.`,
+    };
+  }
+
+  if (code === "23503") {
+    return {
+      status: 400,
+      message: "This record is linked to missing or invalid related data.",
+    };
+  }
+
+  if (code === "22P02") {
+    return {
+      status: 400,
+      message: "Invalid input format.",
+    };
+  }
+
+  return {
+    status: 500,
+    message: fallbackMessage || "Internal server error.",
+  };
 }
 
 function isObject(value) {
@@ -763,12 +881,18 @@ async function handleColleges(req, res, url) {
     );
   }
 
-  const rows = (rowsResult.rows || []).map((row) => ({
-    ...row,
-    college_name: row.name,
-    college_code: row.code,
-    total_students: countMap.get(row.id) || 0,
-  }));
+  const rows = (rowsResult.rows || []).map((row) => {
+    const canonicalName = safeText(row.name || row.college_name);
+    const canonicalCode = safeText(row.code || row.college_code) || null;
+    return {
+      ...row,
+      name: canonicalName,
+      code: canonicalCode,
+      college_name: canonicalName,
+      college_code: canonicalCode,
+      total_students: countMap.get(row.id) || 0,
+    };
+  });
 
   json(res, 200, { rows });
 }
@@ -786,12 +910,21 @@ async function handleCollegeCreate(req, res) {
     return;
   }
 
-  const inserted = await pool.query(
-    `INSERT INTO colleges (
-      name, code, type, contact_person, phone, email, address, city, state, status
-    ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
-    RETURNING *`,
-    [
+  try {
+    const collegesColumns = await getCollegesColumns();
+    const insertColumns = [
+      "name",
+      "code",
+      "type",
+      "contact_person",
+      "phone",
+      "email",
+      "address",
+      "city",
+      "state",
+      "status",
+    ];
+    const values = [
       payload.name,
       payload.code,
       payload.type,
@@ -802,10 +935,31 @@ async function handleCollegeCreate(req, res) {
       payload.city,
       payload.state,
       payload.status,
-    ],
-  );
+    ];
 
-  json(res, 200, { ok: true, row: inserted.rows[0] });
+    // Keep legacy schema columns in sync when they still exist.
+    if (collegesColumns.has("college_name")) {
+      insertColumns.push("college_name");
+      values.push(payload.name);
+    }
+    if (collegesColumns.has("college_code")) {
+      insertColumns.push("college_code");
+      values.push(payload.code);
+    }
+
+    const placeholders = values.map((_, index) => `$${index + 1}`).join(",");
+    const inserted = await pool.query(
+      `INSERT INTO colleges (${insertColumns.join(", ")})
+       VALUES (${placeholders})
+       RETURNING *`,
+      values,
+    );
+
+    json(res, 200, { ok: true, row: inserted.rows[0] });
+  } catch (dbError) {
+    const mapped = mapDatabaseError(dbError, "Unable to create school/college.");
+    json(res, mapped.status, { error: mapped.message });
+  }
 }
 
 async function handleCollegeUpdate(req, res) {
@@ -825,22 +979,9 @@ async function handleCollegeUpdate(req, res) {
     return;
   }
 
-  const updated = await pool.query(
-    `UPDATE colleges
-     SET name = $2,
-         code = $3,
-         type = $4,
-         contact_person = $5,
-         phone = $6,
-         email = $7,
-         address = $8,
-         city = $9,
-         state = $10,
-         status = $11,
-         updated_at = now()
-     WHERE id = $1::uuid
-     RETURNING *`,
-    [
+  try {
+    const collegesColumns = await getCollegesColumns();
+    const values = [
       payload.id,
       payload.name,
       payload.code,
@@ -852,15 +993,48 @@ async function handleCollegeUpdate(req, res) {
       payload.city,
       payload.state,
       payload.status,
-    ],
-  );
+    ];
+    const setClauses = [
+      "name = $2",
+      "code = $3",
+      "type = $4",
+      "contact_person = $5",
+      "phone = $6",
+      "email = $7",
+      "address = $8",
+      "city = $9",
+      "state = $10",
+      "status = $11",
+    ];
 
-  if (!updated.rows[0]) {
-    json(res, 404, { error: "College not found." });
-    return;
+    if (collegesColumns.has("college_name")) {
+      values.push(payload.name);
+      setClauses.push(`college_name = $${values.length}`);
+    }
+    if (collegesColumns.has("college_code")) {
+      values.push(payload.code);
+      setClauses.push(`college_code = $${values.length}`);
+    }
+    setClauses.push("updated_at = now()");
+
+    const updated = await pool.query(
+      `UPDATE colleges
+       SET ${setClauses.join(", ")}
+       WHERE id = $1::uuid
+       RETURNING *`,
+      values,
+    );
+
+    if (!updated.rows[0]) {
+      json(res, 404, { error: "College not found." });
+      return;
+    }
+
+    json(res, 200, { ok: true, row: updated.rows[0] });
+  } catch (dbError) {
+    const mapped = mapDatabaseError(dbError, "Unable to update school/college.");
+    json(res, mapped.status, { error: mapped.message });
   }
-
-  json(res, 200, { ok: true, row: updated.rows[0] });
 }
 
 async function handleCollegeDelete(req, res) {
@@ -949,11 +1123,17 @@ async function handleExamCenters(req, res, url) {
     params,
   );
 
-  const rows = (result.rows || []).map((row) => ({
-    ...row,
-    center_name: row.name,
-    center_code: row.code,
-  }));
+  const rows = (result.rows || []).map((row) => {
+    const canonicalName = safeText(row.name || row.center_name);
+    const canonicalCode = safeText(row.code || row.center_code) || null;
+    return {
+      ...row,
+      name: canonicalName,
+      code: canonicalCode,
+      center_name: canonicalName,
+      center_code: canonicalCode,
+    };
+  });
 
   json(res, 200, { rows });
 }
@@ -971,12 +1151,23 @@ async function handleExamCenterCreate(req, res) {
     return;
   }
 
-  const inserted = await pool.query(
-    `INSERT INTO exam_centers (
-      college_id, name, code, address, city, state, total_rooms, capacity, status, pincode, contact_person, phone
-    ) VALUES ($1::uuid,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
-    RETURNING *`,
-    [
+  try {
+    const examCentersColumns = await getExamCentersColumns();
+    const insertColumns = [
+      "college_id",
+      "name",
+      "code",
+      "address",
+      "city",
+      "state",
+      "total_rooms",
+      "capacity",
+      "status",
+      "pincode",
+      "contact_person",
+      "phone",
+    ];
+    const values = [
       payload.college_id,
       payload.name,
       payload.code,
@@ -989,10 +1180,31 @@ async function handleExamCenterCreate(req, res) {
       payload.pincode,
       payload.contact_person,
       payload.phone,
-    ],
-  );
+    ];
 
-  json(res, 200, { ok: true, row: inserted.rows[0] });
+    // Keep legacy schema columns in sync when they still exist.
+    if (examCentersColumns.has("center_name")) {
+      insertColumns.push("center_name");
+      values.push(payload.name);
+    }
+    if (examCentersColumns.has("center_code")) {
+      insertColumns.push("center_code");
+      values.push(payload.code);
+    }
+
+    const placeholders = values.map((_, index) => `$${index + 1}`).join(",");
+    const inserted = await pool.query(
+      `INSERT INTO exam_centers (${insertColumns.join(", ")})
+       VALUES (${placeholders})
+       RETURNING *`,
+      values,
+    );
+
+    json(res, 200, { ok: true, row: inserted.rows[0] });
+  } catch (dbError) {
+    const mapped = mapDatabaseError(dbError, "Unable to create exam center.");
+    json(res, mapped.status, { error: mapped.message });
+  }
 }
 
 async function handleExamCenterUpdate(req, res) {
@@ -1012,24 +1224,9 @@ async function handleExamCenterUpdate(req, res) {
     return;
   }
 
-  const updated = await pool.query(
-    `UPDATE exam_centers
-     SET college_id = $2::uuid,
-         name = $3,
-         code = $4,
-         address = $5,
-         city = $6,
-         state = $7,
-         total_rooms = $8,
-         capacity = $9,
-         status = $10,
-         pincode = $11,
-         contact_person = $12,
-         phone = $13,
-         updated_at = now()
-     WHERE id = $1::uuid
-     RETURNING *`,
-    [
+  try {
+    const examCentersColumns = await getExamCentersColumns();
+    const values = [
       payload.id,
       payload.college_id,
       payload.name,
@@ -1043,15 +1240,50 @@ async function handleExamCenterUpdate(req, res) {
       payload.pincode,
       payload.contact_person,
       payload.phone,
-    ],
-  );
+    ];
+    const setClauses = [
+      "college_id = $2::uuid",
+      "name = $3",
+      "code = $4",
+      "address = $5",
+      "city = $6",
+      "state = $7",
+      "total_rooms = $8",
+      "capacity = $9",
+      "status = $10",
+      "pincode = $11",
+      "contact_person = $12",
+      "phone = $13",
+    ];
 
-  if (!updated.rows[0]) {
-    json(res, 404, { error: "Exam center not found." });
-    return;
+    if (examCentersColumns.has("center_name")) {
+      values.push(payload.name);
+      setClauses.push(`center_name = $${values.length}`);
+    }
+    if (examCentersColumns.has("center_code")) {
+      values.push(payload.code);
+      setClauses.push(`center_code = $${values.length}`);
+    }
+    setClauses.push("updated_at = now()");
+
+    const updated = await pool.query(
+      `UPDATE exam_centers
+       SET ${setClauses.join(", ")}
+       WHERE id = $1::uuid
+       RETURNING *`,
+      values,
+    );
+
+    if (!updated.rows[0]) {
+      json(res, 404, { error: "Exam center not found." });
+      return;
+    }
+
+    json(res, 200, { ok: true, row: updated.rows[0] });
+  } catch (dbError) {
+    const mapped = mapDatabaseError(dbError, "Unable to update exam center.");
+    json(res, mapped.status, { error: mapped.message });
   }
-
-  json(res, 200, { ok: true, row: updated.rows[0] });
 }
 
 async function handleExamCenterDelete(req, res) {
@@ -1156,21 +1388,51 @@ async function handleRoomCreate(req, res) {
     return;
   }
 
-  const inserted = await pool.query(
-    `INSERT INTO rooms (center_id, room_no, floor, capacity, status, block)
-     VALUES ($1::uuid,$2,$3,$4,$5,$6)
-     RETURNING *`,
-    [
+  try {
+    const roomsColumns = await getRoomsColumns();
+    const insertColumns = [
+      "center_id",
+      "room_no",
+      "floor",
+      "capacity",
+      "status",
+      "block",
+    ];
+    const values = [
       payload.center_id,
       payload.room_no,
       payload.floor,
       payload.capacity,
       payload.status,
       payload.block,
-    ],
-  );
+    ];
 
-  json(res, 200, { ok: true, row: inserted.rows[0] });
+    // Keep legacy schema columns in sync when they still exist.
+    if (roomsColumns.has("exam_center_id")) {
+      insertColumns.push("exam_center_id");
+      values.push(payload.center_id);
+    }
+
+    const placeholders = values
+      .map((_, index) =>
+        insertColumns[index] === "center_id" || insertColumns[index] === "exam_center_id"
+          ? `$${index + 1}::uuid`
+          : `$${index + 1}`,
+      )
+      .join(",");
+
+    const inserted = await pool.query(
+      `INSERT INTO rooms (${insertColumns.join(", ")})
+       VALUES (${placeholders})
+       RETURNING *`,
+      values,
+    );
+
+    json(res, 200, { ok: true, row: inserted.rows[0] });
+  } catch (dbError) {
+    const mapped = mapDatabaseError(dbError, "Unable to create room.");
+    json(res, mapped.status, { error: mapped.message });
+  }
 }
 
 async function handleRoomUpdate(req, res) {
@@ -1186,18 +1448,9 @@ async function handleRoomUpdate(req, res) {
     return;
   }
 
-  const updated = await pool.query(
-    `UPDATE rooms
-     SET center_id = $2::uuid,
-         room_no = $3,
-         floor = $4,
-         capacity = $5,
-         status = $6,
-         block = $7,
-         updated_at = now()
-     WHERE id = $1::uuid
-     RETURNING *`,
-    [
+  try {
+    const roomsColumns = await getRoomsColumns();
+    const values = [
       payload.id,
       payload.center_id,
       payload.room_no,
@@ -1205,51 +1458,121 @@ async function handleRoomUpdate(req, res) {
       payload.capacity,
       payload.status,
       payload.block,
-    ],
-  );
+    ];
+    const setClauses = [
+      "center_id = $2::uuid",
+      "room_no = $3",
+      "floor = $4",
+      "capacity = $5",
+      "status = $6",
+      "block = $7",
+    ];
 
-  if (!updated.rows[0]) {
-    json(res, 404, { error: "Room not found." });
-    return;
+    if (roomsColumns.has("exam_center_id")) {
+      values.push(payload.center_id);
+      setClauses.push(`exam_center_id = $${values.length}::uuid`);
+    }
+    setClauses.push("updated_at = now()");
+
+    const updated = await pool.query(
+      `UPDATE rooms
+       SET ${setClauses.join(", ")}
+       WHERE id = $1::uuid
+       RETURNING *`,
+      values,
+    );
+
+    if (!updated.rows[0]) {
+      json(res, 404, { error: "Room not found." });
+      return;
+    }
+
+    json(res, 200, { ok: true, row: updated.rows[0] });
+  } catch (dbError) {
+    const mapped = mapDatabaseError(dbError, "Unable to update room.");
+    json(res, mapped.status, { error: mapped.message });
   }
-
-  json(res, 200, { ok: true, row: updated.rows[0] });
 }
 
 async function handleRoomDelete(req, res) {
   const body = await readBody(req);
   const id = normalizeUuid(body.id);
+  const forceDelete =
+    body.force === true || safeText(body.force).toLowerCase() === "true";
+
   if (!id) {
     json(res, 400, { error: "id is required." });
     return;
   }
 
-  const roomResult = await pool.query(
-    "SELECT id, center_id, room_no FROM rooms WHERE id = $1::uuid LIMIT 1",
-    [id],
-  );
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
 
-  const room = roomResult.rows[0];
-  if (!room) {
-    json(res, 404, { error: "Room not found." });
-    return;
+    const roomResult = await client.query(
+      "SELECT id, center_id, room_no FROM rooms WHERE id = $1::uuid LIMIT 1",
+      [id],
+    );
+
+    const room = roomResult.rows[0];
+    if (!room) {
+      await client.query("ROLLBACK");
+      json(res, 404, { error: "Room not found." });
+      return;
+    }
+
+    const studentsRef = await client.query(
+      `SELECT COUNT(*)::int AS total
+       FROM students
+       WHERE room_id = $1::uuid
+         OR (center_id = $2::uuid AND LOWER(room) = LOWER($3))`,
+      [room.id, room.center_id, room.room_no],
+    );
+
+    const linkedStudents = studentsRef.rows[0]?.total || 0;
+    if (linkedStudents > 0 && !forceDelete) {
+      await client.query("ROLLBACK");
+      json(res, 400, {
+        error: "Cannot delete this room because it is linked to students.",
+      });
+      return;
+    }
+
+    if (linkedStudents > 0 && forceDelete) {
+      await client.query(
+        `UPDATE students
+         SET room_id = NULL,
+             room = NULL,
+             updated_at = now()
+         WHERE room_id = $1::uuid
+            OR (center_id = $2::uuid AND LOWER(room) = LOWER($3))`,
+        [room.id, room.center_id, room.room_no],
+      );
+    }
+
+    const deleted = await client.query(
+      "DELETE FROM rooms WHERE id = $1::uuid RETURNING id",
+      [id],
+    );
+    if (!deleted.rows[0]) {
+      await client.query("ROLLBACK");
+      json(res, 404, { error: "Room not found." });
+      return;
+    }
+
+    await client.query("COMMIT");
+    json(res, 200, {
+      ok: true,
+      unlinked_students: forceDelete ? linkedStudents : 0,
+    });
+  } catch (error) {
+    try {
+      await client.query("ROLLBACK");
+    } catch {}
+    throw error;
+  } finally {
+    client.release();
   }
-
-  const studentsRef = await pool.query(
-    `SELECT COUNT(*)::int AS total
-     FROM students
-     WHERE room_id = $1::uuid
-       OR (center_id = $2::uuid AND LOWER(room) = LOWER($3))`,
-    [room.id, room.center_id, room.room_no],
-  );
-
-  if ((studentsRef.rows[0]?.total || 0) > 0) {
-    json(res, 400, { error: "Cannot delete this room because it is linked to students." });
-    return;
-  }
-
-  await pool.query("DELETE FROM rooms WHERE id = $1::uuid", [id]);
-  json(res, 200, { ok: true });
 }
 
 async function handleStudentOptions(req, res) {
@@ -1962,6 +2285,7 @@ async function handleAdminLogin(req, res) {
       ok: true,
       admin: { email },
       expiresInMs: ADMIN_SESSION_TTL_MS,
+      sessionToken: token,
     },
     {
       "Set-Cookie": buildAdminCookie(token),

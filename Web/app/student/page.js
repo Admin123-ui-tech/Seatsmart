@@ -17,6 +17,7 @@ import {
 import { supabase } from "@/lib/supabase";
 import { getFriendlySupabaseError } from "@/lib/students";
 import { apiGet } from "@/lib/api";
+import BackButton from "@/components/BackButton";
 
 function StudentPortalContent() {
   const router = useRouter();
@@ -160,13 +161,26 @@ function StudentPortalContent() {
                   Enter your roll number to view your exam seating details
                 </p>
               </div>
-              <button
-                onClick={handleSignOut}
-                className="flex items-center space-x-2 px-4 py-2 bg-white/15 hover:bg-white/25 rounded-lg transition-colors font-medium"
-              >
-                <LogOut className="h-4 w-4" />
-                <span>Logout</span>
-              </button>
+              <div className="flex items-center gap-2">
+                <BackButton
+                  fallbackHref={
+                    centerFromQuery
+                      ? `/student/login?center=${encodeURIComponent(centerFromQuery)}`
+                      : centerIdFromQuery
+                        ? `/student/login?centerId=${encodeURIComponent(centerIdFromQuery)}`
+                        : "/student/login"
+                  }
+                  label="Back"
+                  className="flex items-center space-x-2 px-4 py-2 bg-white/10 hover:bg-white/20 rounded-lg transition-colors font-medium"
+                />
+                <button
+                  onClick={handleSignOut}
+                  className="flex items-center space-x-2 px-4 py-2 bg-white/15 hover:bg-white/25 rounded-lg transition-colors font-medium"
+                >
+                  <LogOut className="h-4 w-4" />
+                  <span>Logout</span>
+                </button>
+              </div>
             </div>
           </div>
 

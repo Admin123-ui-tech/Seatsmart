@@ -7,6 +7,7 @@ import {
   ChevronLeft,
   ChevronRight,
   Download,
+  FileText,
   Printer,
   Search,
   Sparkles,
@@ -130,6 +131,92 @@ export default function SeatingPlanPage() {
     }
   }
 
+  async function handleExportPdf() {
+    try {
+      const payload = await apiGet("/api/students", {
+        search,
+        center: filters.center,
+        school: filters.school,
+        className: filters.className,
+        room: filters.room,
+        all: true,
+      });
+
+      const exportRows = payload.rows || [];
+      const [{ jsPDF }, { default: autoTable }] = await Promise.all([
+        import("jspdf"),
+        import("jspdf-autotable"),
+      ]);
+
+      const doc = new jsPDF({
+        orientation: "landscape",
+        unit: "pt",
+        format: "a4",
+      });
+      const generatedAt = new Date().toLocaleString();
+      const filterSummary = [
+        filters.center ? `Center: ${filters.center}` : "",
+        filters.school ? `School: ${filters.school}` : "",
+        filters.className ? `Class: ${filters.className}` : "",
+        filters.room ? `Room: ${filters.room}` : "",
+        search ? `Search: ${search}` : "",
+      ]
+        .filter(Boolean)
+        .join(" | ");
+
+      doc.setFontSize(16);
+      doc.text("SeatSmart Seating Plan", 40, 40);
+      doc.setFontSize(10);
+      doc.text(`Generated: ${generatedAt}`, 40, 58);
+      if (filterSummary) {
+        doc.text(`Filters: ${filterSummary}`, 40, 74);
+      }
+
+      autoTable(doc, {
+        startY: filterSummary ? 90 : 74,
+        head: [
+          [
+            "Roll No",
+            "Student Name",
+            "Class",
+            "School / College",
+            "Exam Center",
+            "Room",
+            "Seat",
+          ],
+        ],
+        body: exportRows.map((row) => [
+          row.rollno || "-",
+          row.name || "-",
+          row.class_name || "-",
+          row.display_school || "-",
+          row.display_center || "-",
+          row.room || "-",
+          row.seat || "-",
+        ]),
+        styles: { fontSize: 8, cellPadding: 4 },
+        headStyles: { fillColor: [15, 39, 70], textColor: 255 },
+        alternateRowStyles: { fillColor: [248, 250, 252] },
+        margin: { top: 40, right: 40, bottom: 30, left: 40 },
+        didDrawPage: (data) => {
+          const width = doc.internal.pageSize.getWidth();
+          const height = doc.internal.pageSize.getHeight();
+          doc.setFontSize(9);
+          doc.text(`Page ${data.pageNumber}`, width - 80, height - 14);
+        },
+      });
+
+      doc.save("seating-plan.pdf");
+    } catch (exportError) {
+      setError(
+        getFriendlySupabaseError(
+          exportError,
+          "Unable to export seating plan as PDF.",
+        ),
+      );
+    }
+  }
+
   function handlePrint() {
     window.print();
   }
@@ -206,6 +293,13 @@ export default function SeatingPlanPage() {
           >
             <Download className="h-4 w-4 mr-2" />
             Export CSV
+          </button>
+          <button
+            onClick={handleExportPdf}
+            className="px-4 py-2 rounded-lg border border-slate-300 text-slate-700 hover:bg-slate-50 inline-flex items-center"
+          >
+            <FileText className="h-4 w-4 mr-2" />
+            Export PDF
           </button>
           <button
             onClick={handlePrint}

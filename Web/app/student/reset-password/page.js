@@ -6,6 +6,7 @@ import { Suspense, useEffect, useState } from "react";
 import { AlertCircle, CheckCircle2, KeyRound, Save } from "lucide-react";
 import PasswordField from "@/components/PasswordField";
 import { supabase } from "@/lib/supabase";
+import BackButton from "@/components/BackButton";
 
 function StudentResetPasswordContent() {
   const router = useRouter();
@@ -164,6 +165,14 @@ function StudentResetPasswordContent() {
               <span>{loading ? "Updating..." : "Update Password"}</span>
             </span>
           </button>
+
+          <div className="flex justify-center">
+            <BackButton
+              fallbackHref={`/student/login${forwardQuery}`}
+              label="Back"
+              className="inline-flex items-center space-x-1 text-sm text-slate-600 hover:text-slate-800"
+            />
+          </div>
 
           <p className="text-sm text-slate-600">
             Back to{" "}

@@ -10,8 +10,8 @@ const emptyForm = {
   center_id: "",
   room_no: "",
   floor: "",
-  capacity: 0,
-  status: "active",
+  capacity: "",
+  status: "",
 };
 
 export default function RoomsPage() {
@@ -71,7 +71,7 @@ export default function RoomsPage() {
       center_id: row.center_id || "",
       room_no: row.room_no || "",
       floor: row.floor || "",
-      capacity: row.capacity || 0,
+      capacity: row.capacity ?? "",
       status: row.status || "active",
     });
   }
@@ -108,8 +108,42 @@ export default function RoomsPage() {
       await loadRows();
       setSuccess("Room deleted successfully.");
     } catch (deleteError) {
+      const message = getFriendlySupabaseError(deleteError, "Unable to delete room.");
+      const linkedToStudents = String(message)
+        .toLowerCase()
+        .includes("linked to students");
+
+      if (linkedToStudents) {
+        const forceProceed = window.confirm(
+          "This room is linked to students. Delete room and unassign those students from this room?",
+        );
+
+        if (!forceProceed) {
+          setError(message);
+          return;
+        }
+
+        try {
+          const result = await apiPost("/api/rooms/delete", { id, force: true });
+          await loadRows();
+          const unlinkedCount = Number(result?.unlinked_students || 0);
+          setSuccess(
+            unlinkedCount > 0
+              ? `Room deleted. ${unlinkedCount} student record(s) were unassigned from this room.`
+              : "Room deleted successfully.",
+          );
+          return;
+        } catch (forceDeleteError) {
+          setSuccess("");
+          setError(
+            getFriendlySupabaseError(forceDeleteError, "Unable to delete room."),
+          );
+          return;
+        }
+      }
+
       setSuccess("");
-      setError(getFriendlySupabaseError(deleteError, "Unable to delete room."));
+      setError(message);
     }
   }
 
@@ -151,7 +185,7 @@ export default function RoomsPage() {
             onChange={(e) => setCenterFilter(e.target.value)}
             className="border border-slate-300 rounded-lg px-3 py-2"
           >
-            <option value="">All Centers</option>
+            <option value="">Filter by Exam Center (All)</option>
             {centers.map((center) => (
               <option key={center.id} value={center.id}>
                 {center.name}
@@ -198,7 +232,10 @@ export default function RoomsPage() {
             min={0}
             value={form.capacity}
             onChange={(e) =>
-              setForm((prev) => ({ ...prev, capacity: Number(e.target.value || 0) }))
+              setForm((prev) => ({
+                ...prev,
+                capacity: e.target.value === "" ? "" : Number(e.target.value),
+              }))
             }
             placeholder="Capacity"
             className="border border-slate-300 rounded-lg px-3 py-2"
@@ -208,6 +245,7 @@ export default function RoomsPage() {
             onChange={(e) => setForm((prev) => ({ ...prev, status: e.target.value }))}
             className="border border-slate-300 rounded-lg px-3 py-2"
           >
+            <option value="">Select Status (Default: Active)</option>
             <option value="active">Active</option>
             <option value="inactive">Inactive</option>
           </select>

@@ -1,7 +1,10 @@
 import { getApiBaseUrl } from "@/lib/api";
 
 const ADMIN_EMAIL_KEY = "seatsmart_admin_email";
-const AUTH_REQUEST_TIMEOUT_MS = 5000;
+const ADMIN_TOKEN_KEY = "seatsmart_admin_token";
+const AUTH_REQUEST_TIMEOUT_MS = Number(
+  process.env.NEXT_PUBLIC_ADMIN_AUTH_TIMEOUT_MS || 15000,
+);
 
 function buildApiUrl(path) {
   return new URL(path, getApiBaseUrl()).toString();
@@ -26,15 +29,22 @@ export function getAdminEmail() {
   return window.localStorage.getItem(ADMIN_EMAIL_KEY) || "";
 }
 
+export function getAdminToken() {
+  if (typeof window === "undefined") return "";
+  return window.localStorage.getItem(ADMIN_TOKEN_KEY) || "";
+}
+
 export function clearAdminSession() {
   if (typeof window === "undefined") return;
   window.localStorage.removeItem(ADMIN_EMAIL_KEY);
+  window.localStorage.removeItem(ADMIN_TOKEN_KEY);
 }
 
 export async function loginAdmin(email, password) {
+  const loginUrl = buildApiUrl("/api/admin/login");
   let response;
   try {
-    response = await fetchWithTimeout(buildApiUrl("/api/admin/login"), {
+    response = await fetchWithTimeout(loginUrl, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ email, password }),
@@ -42,8 +52,8 @@ export async function loginAdmin(email, password) {
   } catch (error) {
     throw new Error(
       error?.name === "AbortError"
-        ? "Admin auth service timed out. Please ensure API is running on NEXT_PUBLIC_API_URL."
-        : "Unable to reach admin auth service. Please ensure API is running."
+        ? `Admin auth service timed out: ${loginUrl}`
+        : `Unable to reach admin auth service: ${loginUrl}`
     );
   }
 
@@ -54,17 +64,24 @@ export async function loginAdmin(email, password) {
 
   if (typeof window !== "undefined") {
     window.localStorage.setItem(ADMIN_EMAIL_KEY, payload?.admin?.email || String(email || "").trim().toLowerCase());
+    if (payload?.sessionToken) {
+      window.localStorage.setItem(ADMIN_TOKEN_KEY, payload.sessionToken);
+    }
   }
 
   return payload;
 }
 
 export async function verifyAdminSession() {
+  const token = getAdminToken();
   let response;
   try {
     response = await fetchWithTimeout(buildApiUrl("/api/admin/session"), {
       method: "GET",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
     });
   } catch {
     clearAdminSession();
@@ -81,11 +98,15 @@ export async function verifyAdminSession() {
 }
 
 export async function logoutAdmin() {
+  const token = getAdminToken();
   try {
     await fetch(buildApiUrl("/api/admin/logout"), {
       method: "POST",
       credentials: "include",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
     });
   } finally {
     clearAdminSession();

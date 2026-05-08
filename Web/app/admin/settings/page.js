@@ -6,11 +6,31 @@ import { apiGet, apiPost } from "@/lib/api";
 import { getFriendlySupabaseError } from "@/lib/students";
 
 const settingKeys = [
-  { key: "exam_title", label: "Exam Title" },
-  { key: "exam_date", label: "Exam Date" },
-  { key: "exam_time", label: "Exam Time" },
-  { key: "board_session_name", label: "Board / Session Name" },
-  { key: "default_student_portal_url", label: "Default Student Portal URL" },
+  {
+    key: "exam_title",
+    label: "Exam Title",
+    placeholder: "e.g. Annual Board Examination 2026",
+  },
+  {
+    key: "exam_date",
+    label: "Exam Date",
+    placeholder: "e.g. 2026-05-15",
+  },
+  {
+    key: "exam_time",
+    label: "Exam Time",
+    placeholder: "e.g. 09:00 AM - 12:00 PM",
+  },
+  {
+    key: "board_session_name",
+    label: "Board / Session Name",
+    placeholder: "e.g. State Board - 2025-26",
+  },
+  {
+    key: "default_student_portal_url",
+    label: "Default Student Portal URL",
+    placeholder: "e.g. https://seatsmart-psi.vercel.app/student/login",
+  },
 ];
 
 export default function SettingsPage() {
@@ -100,6 +120,7 @@ export default function SettingsPage() {
                   onChange={(e) =>
                     setForm((prev) => ({ ...prev, [item.key]: e.target.value }))
                   }
+                  placeholder={item.placeholder}
                   className="w-full border border-slate-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
                 />
               </div>

@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { AlertCircle, GraduationCap, Shield } from "lucide-react";
@@ -121,6 +122,27 @@ export default function AdminLoginPage() {
           >
             {loading ? "Signing in..." : "Sign In"}
           </button>
+
+          <div className="text-sm text-slate-600 space-y-2 pt-1">
+            <p>
+              New admin?{" "}
+              <Link
+                href="/admin/signup"
+                className="text-orange-600 hover:text-orange-700 font-medium"
+              >
+                Create Admin
+              </Link>
+            </p>
+            <p>
+              Forgot password?{" "}
+              <Link
+                href="/admin/forgot-password"
+                className="text-orange-600 hover:text-orange-700 font-medium"
+              >
+                Reset here
+              </Link>
+            </p>
+          </div>
         </form>
       </div>
     </div>

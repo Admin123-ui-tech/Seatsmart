@@ -6,6 +6,7 @@ import { Suspense, useState } from "react";
 import { AlertCircle, GraduationCap, LogIn } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import PasswordField from "@/components/PasswordField";
+import BackButton from "@/components/BackButton";
 
 function StudentLoginContent() {
   const router = useRouter();
@@ -101,6 +102,14 @@ function StudentLoginContent() {
               <span>{loading ? "Signing in..." : "Sign In"}</span>
             </span>
           </button>
+
+          <div className="flex justify-center">
+            <BackButton
+              fallbackHref="/"
+              label="Back"
+              className="inline-flex items-center space-x-1 text-sm text-slate-600 hover:text-slate-800"
+            />
+          </div>
 
           <div className="text-sm text-slate-600 space-y-2 pt-1">
             <p>

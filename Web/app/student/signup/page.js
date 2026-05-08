@@ -7,6 +7,7 @@ import { AlertCircle, CheckCircle2, GraduationCap, UserPlus } from "lucide-react
 import PasswordField from "@/components/PasswordField";
 import { supabase } from "@/lib/supabase";
 import { getApiBaseUrl } from "@/lib/api";
+import BackButton from "@/components/BackButton";
 
 function parseSignupError(message) {
   const normalized = String(message || "").toLowerCase();
@@ -212,6 +213,14 @@ function StudentSignupContent() {
               <span>{loading ? "Creating account..." : "Create Account"}</span>
             </span>
           </button>
+
+          <div className="flex justify-center">
+            <BackButton
+              fallbackHref={`/student/login${forwardQuery}`}
+              label="Back"
+              className="inline-flex items-center space-x-1 text-sm text-slate-600 hover:text-slate-800"
+            />
+          </div>
 
           <p className="text-sm text-slate-600">
             Already have an account?{" "}

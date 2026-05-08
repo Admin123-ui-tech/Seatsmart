@@ -12,9 +12,9 @@ const emptyForm = {
   address: "",
   city: "",
   state: "",
-  total_rooms: 0,
-  capacity: 0,
-  status: "active",
+  total_rooms: "",
+  capacity: "",
+  status: "",
   college_id: "",
 };
 
@@ -79,8 +79,8 @@ export default function CentersPage() {
       address: row.address || "",
       city: row.city || "",
       state: row.state || "",
-      total_rooms: row.total_rooms || 0,
-      capacity: row.capacity || 0,
+      total_rooms: row.total_rooms ?? "",
+      capacity: row.capacity ?? "",
       status: row.status || "active",
       college_id: row.college_id || "",
     });
@@ -168,7 +168,7 @@ export default function CentersPage() {
             onChange={(e) => setStatusFilter(e.target.value)}
             className="border border-slate-300 rounded-lg px-3 py-2"
           >
-            <option value="">All Status</option>
+            <option value="">Filter by Status (All)</option>
             <option value="active">Active</option>
             <option value="inactive">Inactive</option>
           </select>
@@ -202,7 +202,7 @@ export default function CentersPage() {
               }
               className="border border-slate-300 rounded-lg px-3 py-2"
             >
-              <option value="">Unassigned College</option>
+              <option value="">Select College (Optional)</option>
               {colleges.map((college) => (
                 <option key={college.id} value={college.id}>
                   {college.name}
@@ -232,7 +232,11 @@ export default function CentersPage() {
               min={0}
               value={form.total_rooms}
               onChange={(e) =>
-                setForm((prev) => ({ ...prev, total_rooms: Number(e.target.value || 0) }))
+                setForm((prev) => ({
+                  ...prev,
+                  total_rooms:
+                    e.target.value === "" ? "" : Number(e.target.value),
+                }))
               }
               placeholder="Total Rooms"
               className="border border-slate-300 rounded-lg px-3 py-2"
@@ -242,7 +246,10 @@ export default function CentersPage() {
               min={0}
               value={form.capacity}
               onChange={(e) =>
-                setForm((prev) => ({ ...prev, capacity: Number(e.target.value || 0) }))
+                setForm((prev) => ({
+                  ...prev,
+                  capacity: e.target.value === "" ? "" : Number(e.target.value),
+                }))
               }
               placeholder="Capacity"
               className="border border-slate-300 rounded-lg px-3 py-2"
@@ -252,6 +259,7 @@ export default function CentersPage() {
               onChange={(e) => setForm((prev) => ({ ...prev, status: e.target.value }))}
               className="border border-slate-300 rounded-lg px-3 py-2"
             >
+              <option value="">Select Status (Default: Active)</option>
               <option value="active">Active</option>
               <option value="inactive">Inactive</option>
             </select>

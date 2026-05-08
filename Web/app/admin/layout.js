@@ -7,6 +7,7 @@ import {
   Activity,
   Building2,
   Cog,
+  House,
   LayoutDashboard,
   LogOut,
   MapPinned,
@@ -36,14 +37,17 @@ const navItems = [
 export default function AdminLayout({ children }) {
   const pathname = usePathname();
   const router = useRouter();
-  const isLoginRoute = pathname === "/admin/login";
+  const isPublicAuthRoute =
+    pathname === "/admin/login" ||
+    pathname === "/admin/signup" ||
+    pathname === "/admin/forgot-password";
   const [loading, setLoading] = useState(true);
   const [authError, setAuthError] = useState("");
   const [adminEmail, setAdminEmail] = useState("");
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
   useEffect(() => {
-    if (isLoginRoute) {
+    if (isPublicAuthRoute) {
       setLoading(false);
       setAuthError("");
       return;
@@ -73,7 +77,7 @@ export default function AdminLayout({ children }) {
     return () => {
       mounted = false;
     };
-  }, [isLoginRoute, router]);
+  }, [isPublicAuthRoute, router]);
 
   useEffect(() => {
     if (!sidebarOpen) return undefined;
@@ -89,7 +93,7 @@ export default function AdminLayout({ children }) {
     router.replace("/admin/login");
   }
 
-  if (isLoginRoute) return children;
+  if (isPublicAuthRoute) return children;
 
   if (loading) {
     return (
@@ -133,13 +137,30 @@ export default function AdminLayout({ children }) {
                 ) : null}
               </div>
             </div>
-            <button
-              onClick={handleSignOut}
-              className="flex items-center space-x-2 px-4 py-2 bg-orange-500 text-white rounded-lg hover:bg-orange-600 transition-colors font-medium"
-            >
-              <LogOut className="h-4 w-4" />
-              <span>Logout</span>
-            </button>
+            <div className="flex items-center space-x-2">
+              <Link
+                href="/"
+                className="flex items-center space-x-2 px-4 py-2 border border-white/40 text-white rounded-lg hover:bg-white/10 transition-colors font-medium"
+              >
+                <House className="h-4 w-4" />
+                <span>Home</span>
+              </Link>
+              <Link
+                href="/student/login"
+                className="flex items-center space-x-2 px-4 py-2 border border-white/40 text-white rounded-lg hover:bg-white/10 transition-colors font-medium"
+              >
+                <Users className="h-4 w-4" />
+                <span className="hidden sm:inline">Student Panel</span>
+                <span className="sm:hidden">Student</span>
+              </Link>
+              <button
+                onClick={handleSignOut}
+                className="flex items-center space-x-2 px-4 py-2 bg-orange-500 text-white rounded-lg hover:bg-orange-600 transition-colors font-medium"
+              >
+                <LogOut className="h-4 w-4" />
+                <span>Logout</span>
+              </button>
+            </div>
           </div>
         </div>
       </header>

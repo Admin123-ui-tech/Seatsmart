@@ -52,6 +52,17 @@ BEGIN
   END IF;
 END $$;
 
+-- Legacy compatibility: keep old columns optional so canonical writes succeed.
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_name = 'colleges' AND column_name = 'college_name'
+  ) THEN
+    EXECUTE 'ALTER TABLE colleges ALTER COLUMN college_name DROP NOT NULL';
+  END IF;
+END $$;
+
 UPDATE colleges SET type = COALESCE(NULLIF(type, ''), 'school');
 UPDATE colleges SET status = COALESCE(NULLIF(status, ''), 'active');
 UPDATE colleges SET created_at = COALESCE(created_at, now());
@@ -124,6 +135,17 @@ BEGIN
   END IF;
 END $$;
 
+-- Legacy compatibility: keep old columns optional so canonical writes succeed.
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_name = 'exam_centers' AND column_name = 'center_name'
+  ) THEN
+    EXECUTE 'ALTER TABLE exam_centers ALTER COLUMN center_name DROP NOT NULL';
+  END IF;
+END $$;
+
 UPDATE exam_centers SET total_rooms = COALESCE(total_rooms, 0);
 UPDATE exam_centers SET capacity = COALESCE(capacity, 0);
 UPDATE exam_centers SET status = COALESCE(NULLIF(status, ''), 'active');
@@ -189,6 +211,17 @@ BEGIN
     WHERE table_name = 'rooms' AND column_name = 'exam_center_id'
   ) THEN
     EXECUTE 'UPDATE rooms SET center_id = COALESCE(center_id, exam_center_id)';
+  END IF;
+END $$;
+
+-- Legacy compatibility: keep old columns optional so canonical writes succeed.
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_name = 'rooms' AND column_name = 'exam_center_id'
+  ) THEN
+    EXECUTE 'ALTER TABLE rooms ALTER COLUMN exam_center_id DROP NOT NULL';
   END IF;
 END $$;
 

@@ -5,6 +5,7 @@ import { useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useState } from "react";
 import { AlertCircle, CheckCircle2, KeyRound } from "lucide-react";
 import { supabase } from "@/lib/supabase";
+import BackButton from "@/components/BackButton";
 
 const RESEND_COOLDOWN_SECONDS = 60;
 
@@ -155,6 +156,14 @@ function StudentForgotPasswordContent() {
                 ? `Try again in ${cooldownLeft}s`
                 : "Send Reset Link"}
           </button>
+
+          <div className="flex justify-center">
+            <BackButton
+              fallbackHref={`/student/login${forwardQuery}`}
+              label="Back"
+              className="inline-flex items-center space-x-1 text-sm text-slate-600 hover:text-slate-800"
+            />
+          </div>
 
           <p className="text-sm text-slate-600">
             Back to{" "}
