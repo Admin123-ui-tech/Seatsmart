@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useState } from "react";
-import { AlertCircle, CheckCircle2, Copy, KeyRound } from "lucide-react";
+import { AlertCircle, CheckCircle2, KeyRound } from "lucide-react";
 import PasswordField from "@/components/PasswordField";
 import { upsertAdminCredentials } from "@/lib/adminAuth";
 
@@ -12,15 +12,12 @@ export default function AdminForgotPasswordPage() {
   const [confirmPassword, setConfirmPassword] = useState("");
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
-  const [envPreview, setEnvPreview] = useState("");
-  const [copied, setCopied] = useState(false);
   const [saving, setSaving] = useState(false);
 
   async function handleSubmit(event) {
     event.preventDefault();
     setError("");
     setSuccess("");
-    setCopied(false);
 
     const normalizedEmail = email.trim().toLowerCase();
     if (!normalizedEmail || !password || !confirmPassword) {
@@ -38,29 +35,12 @@ export default function AdminForgotPasswordPage() {
 
     setSaving(true);
     try {
-      const payload = await upsertAdminCredentials(normalizedEmail, password);
-      const snippet =
-        String(payload?.envPreview || "").trim() ||
-        `ADMIN_EMAIL=${normalizedEmail}\nADMIN_PASSWORD=${password}`;
-      setEnvPreview(snippet);
-      setSuccess(
-        "Password reset saved to Supabase. Env values are also prepared below.",
-      );
+      await upsertAdminCredentials(normalizedEmail, password);
+      setSuccess("Password reset saved to Supabase database.");
     } catch (submitError) {
       setError(String(submitError?.message || "Unable to reset admin password."));
     } finally {
       setSaving(false);
-    }
-  }
-
-  async function handleCopyEnv() {
-    if (!envPreview) return;
-    try {
-      await navigator.clipboard.writeText(envPreview);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1200);
-    } catch {
-      setError("Unable to copy env values.");
     }
   }
 
@@ -73,7 +53,7 @@ export default function AdminForgotPasswordPage() {
           </div>
           <h1 className="text-2xl font-bold">Admin Forgot Password</h1>
           <p className="text-slate-200 text-sm mt-1">
-            Password is managed from backend environment settings
+            Password is managed in Supabase database
           </p>
         </div>
 
@@ -123,21 +103,6 @@ export default function AdminForgotPasswordPage() {
             <div className="bg-green-50 border border-green-200 rounded-lg p-3 text-sm text-green-700 flex items-start space-x-2">
               <CheckCircle2 className="h-4 w-4 mt-0.5 flex-shrink-0" />
               <span>{success}</span>
-            </div>
-          ) : null}
-
-          {envPreview ? (
-            <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
-              <p className="text-xs font-semibold text-slate-600 mb-2">Backend Env Update</p>
-              <pre className="text-xs text-slate-800 whitespace-pre-wrap">{envPreview}</pre>
-              <button
-                type="button"
-                onClick={handleCopyEnv}
-                className="mt-3 inline-flex items-center px-3 py-2 rounded-lg border border-slate-300 text-slate-700 hover:bg-slate-100 text-sm"
-              >
-                <Copy className="h-4 w-4 mr-2" />
-                {copied ? "Copied" : "Copy Values"}
-              </button>
             </div>
           ) : null}
 
