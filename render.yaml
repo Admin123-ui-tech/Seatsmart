@@ -1,0 +1,10 @@
+services:
+  - type: web
+    name: seatsmart-api
+    runtime: node
+    rootDir: API
+    plan: free
+    buildCommand: npm install && npm run build
+    startCommand: npm run start
+    healthCheckPath: /health
+    autoDeploy: true

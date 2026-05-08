@@ -1,0 +1,16 @@
+{
+  "name": "seatsmart-api",
+  "version": "0.1.0",
+  "private": true,
+  "dependencies": {
+    "pg": "^8.16.3"
+  },
+  "scripts": {
+    "dev": "node --watch src/index.js",
+    "build": "node --check src/index.js",
+    "start": "node src/index.js",
+    "backup:students": "node scripts/export-students.js",
+    "backup:verify": "node scripts/restore-students-dry-run.js",
+    "configure:supabase-auth": "node scripts/configure-supabase-auth.js"
+  }
+}
