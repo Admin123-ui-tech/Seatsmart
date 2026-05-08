@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useState } from "react";
 import { AlertCircle, CheckCircle2, Copy, GraduationCap, Shield } from "lucide-react";
 import PasswordField from "@/components/PasswordField";
+import { upsertAdminCredentials } from "@/lib/adminAuth";
 
 export default function AdminSignupPage() {
   const [email, setEmail] = useState("");
@@ -13,11 +14,13 @@ export default function AdminSignupPage() {
   const [success, setSuccess] = useState("");
   const [envPreview, setEnvPreview] = useState("");
   const [copied, setCopied] = useState(false);
+  const [saving, setSaving] = useState(false);
 
-  function handleSubmit(event) {
+  async function handleSubmit(event) {
     event.preventDefault();
     setError("");
     setSuccess("");
+    setCopied(false);
 
     const normalizedEmail = email.trim().toLowerCase();
     if (!normalizedEmail || !password || !confirmPassword) {
@@ -33,11 +36,21 @@ export default function AdminSignupPage() {
       return;
     }
 
-    const snippet = `ADMIN_EMAIL=${normalizedEmail}\nADMIN_PASSWORD=${password}`;
-    setEnvPreview(snippet);
-    setSuccess(
-      "Admin credentials prepared. Copy the values below, update backend env, then redeploy API.",
-    );
+    setSaving(true);
+    try {
+      const payload = await upsertAdminCredentials(normalizedEmail, password);
+      const snippet =
+        String(payload?.envPreview || "").trim() ||
+        `ADMIN_EMAIL=${normalizedEmail}\nADMIN_PASSWORD=${password}`;
+      setEnvPreview(snippet);
+      setSuccess(
+        "Admin credentials saved to Supabase. Env values are also prepared below.",
+      );
+    } catch (submitError) {
+      setError(String(submitError?.message || "Unable to save admin credentials."));
+    } finally {
+      setSaving(false);
+    }
   }
 
   async function handleCopyEnv() {
@@ -135,9 +148,10 @@ export default function AdminSignupPage() {
 
           <button
             type="submit"
-            className="w-full bg-orange-500 text-white py-3 px-4 rounded-lg font-semibold hover:bg-orange-600 transition-colors"
+            disabled={saving}
+            className="w-full bg-orange-500 text-white py-3 px-4 rounded-lg font-semibold hover:bg-orange-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
           >
-            Continue
+            {saving ? "Saving..." : "Continue"}
           </button>
 
           <p className="text-sm text-slate-600">

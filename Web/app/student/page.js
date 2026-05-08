@@ -1,9 +1,11 @@
 "use client";
 
+import Link from "next/link";
 import { Suspense, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
   Search,
+  House,
   LogOut,
   User,
   MapPin,
@@ -162,6 +164,13 @@ function StudentPortalContent() {
                 </p>
               </div>
               <div className="flex items-center gap-2">
+                <Link
+                  href="/"
+                  className="flex items-center space-x-2 px-4 py-2 bg-white/10 hover:bg-white/20 rounded-lg transition-colors font-medium"
+                >
+                  <House className="h-4 w-4" />
+                  <span>Home</span>
+                </Link>
                 <BackButton
                   fallbackHref={
                     centerFromQuery

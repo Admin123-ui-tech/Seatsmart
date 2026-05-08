@@ -3,10 +3,9 @@
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useState } from "react";
-import { AlertCircle, GraduationCap, LogIn } from "lucide-react";
+import { AlertCircle, GraduationCap, House, LogIn } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import PasswordField from "@/components/PasswordField";
-import BackButton from "@/components/BackButton";
 
 function StudentLoginContent() {
   const router = useRouter();
@@ -103,13 +102,13 @@ function StudentLoginContent() {
             </span>
           </button>
 
-          <div className="flex justify-center">
-            <BackButton
-              fallbackHref="/"
-              label="Back"
-              className="inline-flex items-center space-x-1 text-sm text-slate-600 hover:text-slate-800"
-            />
-          </div>
+          <Link
+            href="/"
+            className="w-full border border-slate-300 text-slate-700 py-3 px-4 rounded-lg font-semibold hover:bg-slate-50 transition-colors inline-flex items-center justify-center"
+          >
+            <House className="h-4 w-4 mr-2" />
+            Home
+          </Link>
 
           <div className="text-sm text-slate-600 space-y-2 pt-1">
             <p>

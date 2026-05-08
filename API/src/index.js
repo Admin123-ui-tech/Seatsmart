@@ -91,6 +91,8 @@ const adminEmail = String(process.env.ADMIN_EMAIL || "")
   .trim()
   .toLowerCase();
 const adminPassword = String(process.env.ADMIN_PASSWORD || "");
+const ADMIN_SETTINGS_EMAIL_KEY = "admin_email";
+const ADMIN_SETTINGS_PASSWORD_KEY = "admin_password";
 const adminSessionSecret =
   String(process.env.ADMIN_SESSION_SECRET || "").trim() ||
   `${adminEmail}:${adminPassword}`;
@@ -318,8 +320,50 @@ function isObject(value) {
   return value && typeof value === "object" && !Array.isArray(value);
 }
 
-function isAdminConfigured() {
-  return !!adminEmail && !!adminPassword;
+function hasAdminCredentials(credentials) {
+  return (
+    !!normalizeEmail(credentials?.email) &&
+    !!String(credentials?.password || "")
+  );
+}
+
+async function getAdminCredentials() {
+  const fallback = {
+    email: adminEmail,
+    password: adminPassword,
+    source: "environment",
+  };
+
+  try {
+    const result = await pool.query(
+      `SELECT key, value
+       FROM settings
+       WHERE key = ANY($1::text[])`,
+      [[ADMIN_SETTINGS_EMAIL_KEY, ADMIN_SETTINGS_PASSWORD_KEY]],
+    );
+
+    const map = {};
+    for (const row of result.rows || []) {
+      map[safeText(row.key)] = row.value;
+    }
+
+    const dbEmail = normalizeEmail(map[ADMIN_SETTINGS_EMAIL_KEY]);
+    const dbPassword = String(map[ADMIN_SETTINGS_PASSWORD_KEY] || "");
+
+    if (dbEmail && dbPassword) {
+      return {
+        email: dbEmail,
+        password: dbPassword,
+        source: "database",
+      };
+    }
+  } catch (error) {
+    console.warn("Unable to read admin credentials from settings:", {
+      message: error?.message || "Unknown error",
+    });
+  }
+
+  return fallback;
 }
 
 function getBearerToken(req) {
@@ -751,15 +795,19 @@ async function handleDashboard(req, res) {
 }
 
 async function handleSystemHealth(req, res) {
+  const adminCredentials = await getAdminCredentials();
+  const adminConfigured = hasAdminCredentials(adminCredentials);
   const checks = {
     api: { ok: true, message: "API server reachable" },
     database: { ok: false, message: "Not checked" },
-    adminAuth: { ok: isAdminConfigured(), message: "" },
+    adminAuth: { ok: adminConfigured, message: "" },
   };
 
   checks.adminAuth.message = checks.adminAuth.ok
-    ? "ADMIN_EMAIL / ADMIN_PASSWORD configured"
-    : "Missing ADMIN_EMAIL or ADMIN_PASSWORD";
+    ? adminCredentials.source === "database"
+      ? "Admin credentials configured in database settings"
+      : "ADMIN_EMAIL / ADMIN_PASSWORD configured"
+    : "Missing admin credentials in DB settings and environment";
 
   try {
     await pool.query("SELECT 1");
@@ -2251,7 +2299,9 @@ async function handleAdminLogin(req, res) {
     return;
   }
 
-  if (!isAdminConfigured()) {
+  const configuredAdmin = await getAdminCredentials();
+
+  if (!hasAdminCredentials(configuredAdmin)) {
     json(res, 500, {
       error: "Admin credentials are not configured on the API server.",
     });
@@ -2272,7 +2322,7 @@ async function handleAdminLogin(req, res) {
     return;
   }
 
-  if (email !== adminEmail || password !== adminPassword) {
+  if (email !== configuredAdmin.email || password !== configuredAdmin.password) {
     json(res, 401, { error: "Invalid admin email or password." });
     return;
   }
@@ -2291,6 +2341,95 @@ async function handleAdminLogin(req, res) {
       "Set-Cookie": buildAdminCookie(token),
     },
   );
+}
+
+async function handleAdminCredentialsUpsert(req, res) {
+  if (
+    !enforceRateLimit(
+      req,
+      res,
+      "admin-credentials-upsert",
+      10 * 60 * 1000,
+      ADMIN_LOGIN_RATE_LIMIT_MAX,
+      "Too many admin credential update attempts. Please wait and try again.",
+    )
+  ) {
+    return;
+  }
+
+  const body = await readBody(req);
+  if (!isObject(body)) {
+    json(res, 400, { error: "Invalid request body." });
+    return;
+  }
+
+  const email = normalizeEmail(body.email);
+  const password = String(body.password || "");
+
+  if (!email || !password) {
+    json(res, 400, { error: "Email and password are required." });
+    return;
+  }
+
+  if (!isValidEmail(email)) {
+    json(res, 400, { error: "Invalid email address." });
+    return;
+  }
+
+  if (password.length < 6) {
+    json(res, 400, { error: "Password must be at least 6 characters." });
+    return;
+  }
+
+  const existingCredentials = await getAdminCredentials();
+  const currentSession =
+    readAdminSession(getBearerToken(req) || getAdminCookieToken(req));
+  const canChangeEmailWithoutSession =
+    !hasAdminCredentials(existingCredentials) ||
+    email === existingCredentials.email;
+
+  if (!canChangeEmailWithoutSession && !currentSession) {
+    json(res, 403, {
+      error:
+        "Email change requires active admin session. Use current admin email for reset.",
+    });
+    return;
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+
+    await client.query(
+      `INSERT INTO settings (key, value, updated_at)
+       VALUES ($1, $2, now())
+       ON CONFLICT (key)
+       DO UPDATE SET value = EXCLUDED.value, updated_at = now()`,
+      [ADMIN_SETTINGS_EMAIL_KEY, email],
+    );
+
+    await client.query(
+      `INSERT INTO settings (key, value, updated_at)
+       VALUES ($1, $2, now())
+       ON CONFLICT (key)
+       DO UPDATE SET value = EXCLUDED.value, updated_at = now()`,
+      [ADMIN_SETTINGS_PASSWORD_KEY, password],
+    );
+
+    await client.query("COMMIT");
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
+
+  json(res, 200, {
+    ok: true,
+    admin: { email },
+    savedTo: "database",
+    envPreview: `ADMIN_EMAIL=${email}\nADMIN_PASSWORD=${password}`,
+  });
 }
 
 async function handleAdminSession(req, res) {
@@ -2406,6 +2545,10 @@ async function route(req, res) {
 
     if (req.method === "POST" && pathname === "/api/admin/login") {
       await handleAdminLogin(req, res);
+      return;
+    }
+    if (req.method === "POST" && pathname === "/api/admin/credentials/upsert") {
+      await handleAdminCredentialsUpsert(req, res);
       return;
     }
     if (req.method === "GET" && pathname === "/api/admin/session") {

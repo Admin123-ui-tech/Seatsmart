@@ -72,6 +72,36 @@ export async function loginAdmin(email, password) {
   return payload;
 }
 
+export async function upsertAdminCredentials(email, password) {
+  const normalizedEmail = String(email || "").trim().toLowerCase();
+  const rawPassword = String(password || "");
+  const upsertUrl = buildApiUrl("/api/admin/credentials/upsert");
+  let response;
+  try {
+    response = await fetchWithTimeout(upsertUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        email: normalizedEmail,
+        password: rawPassword,
+      }),
+    });
+  } catch (error) {
+    throw new Error(
+      error?.name === "AbortError"
+        ? `Admin credential service timed out: ${upsertUrl}`
+        : `Unable to reach admin credential service: ${upsertUrl}`,
+    );
+  }
+
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(payload.error || `Request failed (${response.status}).`);
+  }
+
+  return payload;
+}
+
 export async function verifyAdminSession() {
   const token = getAdminToken();
   let response;

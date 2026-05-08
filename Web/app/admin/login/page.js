@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { AlertCircle, GraduationCap, Shield } from "lucide-react";
+import { AlertCircle, GraduationCap, House, Shield } from "lucide-react";
 import PasswordField from "@/components/PasswordField";
 import { loginAdmin, verifyAdminSession } from "@/lib/adminAuth";
 
@@ -122,6 +122,14 @@ export default function AdminLoginPage() {
           >
             {loading ? "Signing in..." : "Sign In"}
           </button>
+
+          <Link
+            href="/"
+            className="w-full border border-slate-300 text-slate-700 py-3 px-4 rounded-lg font-semibold hover:bg-slate-50 transition-colors inline-flex items-center justify-center"
+          >
+            <House className="h-4 w-4 mr-2" />
+            Home
+          </Link>
 
           <div className="text-sm text-slate-600 space-y-2 pt-1">
             <p>
