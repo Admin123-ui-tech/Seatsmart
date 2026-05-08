@@ -93,6 +93,7 @@ const adminEmail = String(process.env.ADMIN_EMAIL || "")
 const adminPassword = String(process.env.ADMIN_PASSWORD || "");
 const ADMIN_SETTINGS_EMAIL_KEY = "admin_email";
 const ADMIN_SETTINGS_PASSWORD_KEY = "admin_password";
+const ADMIN_CREDENTIALS_PRIMARY_KEY = "primary";
 const adminSessionSecret =
   String(process.env.ADMIN_SESSION_SECRET || "").trim() ||
   `${adminEmail}:${adminPassword}`;
@@ -327,6 +328,55 @@ function hasAdminCredentials(credentials) {
   );
 }
 
+async function getAdminCredentialsFromAdminTable() {
+  const result = await pool.query(
+    `SELECT email, password
+     FROM admin_credentials
+     WHERE key = $1
+     LIMIT 1`,
+    [ADMIN_CREDENTIALS_PRIMARY_KEY],
+  );
+
+  const row = result.rows?.[0];
+  if (!row) return null;
+
+  const dbEmail = normalizeEmail(row.email);
+  const dbPassword = String(row.password || "");
+
+  if (!dbEmail || !dbPassword) return null;
+
+  return {
+    email: dbEmail,
+    password: dbPassword,
+    source: "admin_credentials",
+  };
+}
+
+async function getAdminCredentialsFromSettings() {
+  const result = await pool.query(
+    `SELECT key, value
+     FROM settings
+     WHERE key = ANY($1::text[])`,
+    [[ADMIN_SETTINGS_EMAIL_KEY, ADMIN_SETTINGS_PASSWORD_KEY]],
+  );
+
+  const map = {};
+  for (const row of result.rows || []) {
+    map[safeText(row.key)] = row.value;
+  }
+
+  const dbEmail = normalizeEmail(map[ADMIN_SETTINGS_EMAIL_KEY]);
+  const dbPassword = String(map[ADMIN_SETTINGS_PASSWORD_KEY] || "");
+
+  if (!dbEmail || !dbPassword) return null;
+
+  return {
+    email: dbEmail,
+    password: dbPassword,
+    source: "settings",
+  };
+}
+
 async function getAdminCredentials() {
   const fallback = {
     email: adminEmail,
@@ -335,30 +385,13 @@ async function getAdminCredentials() {
   };
 
   try {
-    const result = await pool.query(
-      `SELECT key, value
-       FROM settings
-       WHERE key = ANY($1::text[])`,
-      [[ADMIN_SETTINGS_EMAIL_KEY, ADMIN_SETTINGS_PASSWORD_KEY]],
-    );
+    const adminTableCredentials = await getAdminCredentialsFromAdminTable();
+    if (adminTableCredentials) return adminTableCredentials;
 
-    const map = {};
-    for (const row of result.rows || []) {
-      map[safeText(row.key)] = row.value;
-    }
-
-    const dbEmail = normalizeEmail(map[ADMIN_SETTINGS_EMAIL_KEY]);
-    const dbPassword = String(map[ADMIN_SETTINGS_PASSWORD_KEY] || "");
-
-    if (dbEmail && dbPassword) {
-      return {
-        email: dbEmail,
-        password: dbPassword,
-        source: "database",
-      };
-    }
+    const settingsCredentials = await getAdminCredentialsFromSettings();
+    if (settingsCredentials) return settingsCredentials;
   } catch (error) {
-    console.warn("Unable to read admin credentials from settings:", {
+    console.warn("Unable to read admin credentials from database:", {
       message: error?.message || "Unknown error",
     });
   }
@@ -804,10 +837,12 @@ async function handleSystemHealth(req, res) {
   };
 
   checks.adminAuth.message = checks.adminAuth.ok
-    ? adminCredentials.source === "database"
-      ? "Admin credentials configured in database settings"
+    ? adminCredentials.source === "admin_credentials"
+      ? "Admin credentials configured in admin_credentials table"
+      : adminCredentials.source === "settings"
+        ? "Admin credentials configured in settings table"
       : "ADMIN_EMAIL / ADMIN_PASSWORD configured"
-    : "Missing admin credentials in DB settings and environment";
+    : "Missing admin credentials in DB tables and environment";
 
   try {
     await pool.query("SELECT 1");
@@ -2384,6 +2419,14 @@ async function handleAdminCredentialsUpsert(req, res) {
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
+
+    await client.query(
+      `INSERT INTO admin_credentials (key, email, password, updated_at)
+       VALUES ($1, $2, $3, now())
+       ON CONFLICT (key)
+       DO UPDATE SET email = EXCLUDED.email, password = EXCLUDED.password, updated_at = now()`,
+      [ADMIN_CREDENTIALS_PRIMARY_KEY, email, password],
+    );
 
     await client.query(
       `INSERT INTO settings (key, value, updated_at)

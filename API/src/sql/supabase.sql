@@ -267,6 +267,61 @@ CREATE TABLE IF NOT EXISTS settings (
   updated_at timestamptz NOT NULL DEFAULT now()
 );
 
+-- Admin credentials (explicit table for admin auth visibility)
+CREATE TABLE IF NOT EXISTS admin_credentials (
+  key text PRIMARY KEY,
+  email text NOT NULL,
+  password text NOT NULL,
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+
+-- Backfill admin credentials from settings when available
+DO $$
+DECLARE
+  v_email text;
+  v_password text;
+BEGIN
+  SELECT value INTO v_email FROM settings WHERE key = 'admin_email' LIMIT 1;
+  SELECT value INTO v_password FROM settings WHERE key = 'admin_password' LIMIT 1;
+
+  IF COALESCE(v_email, '') <> '' AND COALESCE(v_password, '') <> '' THEN
+    INSERT INTO admin_credentials (key, email, password, updated_at)
+    VALUES ('primary', LOWER(v_email), v_password, now())
+    ON CONFLICT (key)
+    DO UPDATE
+    SET email = EXCLUDED.email, password = EXCLUDED.password, updated_at = now();
+  END IF;
+END $$;
+
+CREATE OR REPLACE FUNCTION sync_admin_credentials_from_settings()
+RETURNS trigger
+LANGUAGE plpgsql
+AS $$
+DECLARE
+  v_email text;
+  v_password text;
+BEGIN
+  SELECT value INTO v_email FROM settings WHERE key = 'admin_email' LIMIT 1;
+  SELECT value INTO v_password FROM settings WHERE key = 'admin_password' LIMIT 1;
+
+  IF COALESCE(v_email, '') <> '' AND COALESCE(v_password, '') <> '' THEN
+    INSERT INTO admin_credentials (key, email, password, updated_at)
+    VALUES ('primary', LOWER(v_email), v_password, now())
+    ON CONFLICT (key)
+    DO UPDATE
+    SET email = EXCLUDED.email, password = EXCLUDED.password, updated_at = now();
+  END IF;
+
+  RETURN NEW;
+END $$;
+
+DROP TRIGGER IF EXISTS trg_sync_admin_credentials_from_settings ON settings;
+CREATE TRIGGER trg_sync_admin_credentials_from_settings
+AFTER INSERT OR UPDATE ON settings
+FOR EACH ROW
+WHEN (NEW.key IN ('admin_email', 'admin_password'))
+EXECUTE FUNCTION sync_admin_credentials_from_settings();
+
 -- Students
 CREATE TABLE IF NOT EXISTS students (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
