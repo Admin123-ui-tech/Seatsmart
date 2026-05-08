@@ -97,6 +97,13 @@ const adminSessionSecret =
 const ADMIN_SESSION_TTL_MS = 1000 * 60 * 60 * 12;
 const ADMIN_COOKIE_NAME = "seatsmart_admin_session";
 const isProduction = String(process.env.NODE_ENV || "").toLowerCase() === "production";
+const adminCookieSameSite = (() => {
+  const raw = safeText(process.env.ADMIN_COOKIE_SAMESITE).toLowerCase();
+  if (raw === "none" || raw === "lax" || raw === "strict") {
+    return raw.charAt(0).toUpperCase() + raw.slice(1);
+  }
+  return isProduction ? "None" : "Lax";
+})();
 const ADMIN_LOGIN_RATE_LIMIT_MAX = Math.max(
   1,
   Number(process.env.ADMIN_LOGIN_RATE_LIMIT_MAX || 20),
@@ -276,13 +283,13 @@ function deleteAdminSession(token) {
 
 function buildAdminCookie(token, expiresInMs = ADMIN_SESSION_TTL_MS) {
   const maxAgeSeconds = Math.max(0, Math.floor(expiresInMs / 1000));
-  const secure = isProduction ? "; Secure" : "";
-  return `${ADMIN_COOKIE_NAME}=${encodeURIComponent(token)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${maxAgeSeconds}${secure}`;
+  const secure = isProduction || adminCookieSameSite === "None" ? "; Secure" : "";
+  return `${ADMIN_COOKIE_NAME}=${encodeURIComponent(token)}; Path=/; HttpOnly; SameSite=${adminCookieSameSite}; Max-Age=${maxAgeSeconds}${secure}`;
 }
 
 function buildExpiredAdminCookie() {
-  const secure = isProduction ? "; Secure" : "";
-  return `${ADMIN_COOKIE_NAME}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0${secure}`;
+  const secure = isProduction || adminCookieSameSite === "None" ? "; Secure" : "";
+  return `${ADMIN_COOKIE_NAME}=; Path=/; HttpOnly; SameSite=${adminCookieSameSite}; Max-Age=0${secure}`;
 }
 
 function isOriginAllowed(req) {
