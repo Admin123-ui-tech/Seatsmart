@@ -73,6 +73,7 @@ const supabaseUrl = safeText(
 const supabaseAnonKey = safeText(
   process.env.SUPABASE_ANON_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
 );
+const supabaseServiceRoleKey = safeText(process.env.SUPABASE_SERVICE_ROLE_KEY);
 
 const CORS_BASE_HEADERS = {
   "Access-Control-Allow-Methods": "GET,POST,PUT,DELETE,OPTIONS",
@@ -118,6 +119,10 @@ const STUDENT_SEAT_RATE_LIMIT_MAX = Math.max(
 const STUDENT_PROFILE_UPSERT_RATE_LIMIT_MAX = Math.max(
   1,
   Number(process.env.STUDENT_PROFILE_UPSERT_RATE_LIMIT_MAX || 20),
+);
+const STUDENT_PASSWORD_RESET_RATE_LIMIT_MAX = Math.max(
+  1,
+  Number(process.env.STUDENT_PASSWORD_RESET_RATE_LIMIT_MAX || 10),
 );
 const rateLimitStore = new Map();
 let collegesColumnsPromise = null;
@@ -544,6 +549,39 @@ async function requireStudentSession(req, res) {
   }
 
   return user;
+}
+
+async function getAuthUserIdByEmail(email) {
+  const result = await pool.query(
+    `SELECT id::text AS id
+     FROM auth.users
+     WHERE LOWER(email) = LOWER($1)
+     ORDER BY created_at DESC
+     LIMIT 1`,
+    [email],
+  );
+
+  return safeText(result.rows?.[0]?.id) || null;
+}
+
+async function updateSupabaseAuthPassword(userId, password) {
+  const response = await fetch(`${supabaseUrl}/auth/v1/admin/users/${userId}`, {
+    method: "PUT",
+    headers: {
+      apikey: supabaseServiceRoleKey,
+      Authorization: `Bearer ${supabaseServiceRoleKey}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ password }),
+  });
+
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    const message = safeText(
+      payload?.msg || payload?.error_description || payload?.error,
+    );
+    throw new Error(message || `Supabase password update failed (${response.status}).`);
+  }
 }
 
 function getClientIp(req) {
@@ -2313,6 +2351,74 @@ async function handleStudentProfileUpsert(req, res) {
   json(res, 200, { ok: true, row: result.rows[0] });
 }
 
+async function handleStudentPasswordResetDirect(req, res) {
+  if (
+    !enforceRateLimit(
+      req,
+      res,
+      "student-password-reset-direct",
+      10 * 60 * 1000,
+      STUDENT_PASSWORD_RESET_RATE_LIMIT_MAX,
+      "Too many password reset attempts. Please wait and try again.",
+    )
+  ) {
+    return;
+  }
+
+  if (!supabaseUrl || !supabaseServiceRoleKey) {
+    json(res, 500, {
+      error:
+        "Student password reset service is not configured. Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY.",
+    });
+    return;
+  }
+
+  const body = await readBody(req);
+  if (!isObject(body)) {
+    json(res, 400, { error: "Invalid request body." });
+    return;
+  }
+
+  const email = normalizeEmail(body.email);
+  const password = String(body.password || "");
+
+  if (!email || !password) {
+    json(res, 400, { error: "Email and password are required." });
+    return;
+  }
+
+  if (!isValidEmail(email)) {
+    json(res, 400, { error: "Invalid email address." });
+    return;
+  }
+
+  if (password.length < 6) {
+    json(res, 400, { error: "Password must be at least 6 characters." });
+    return;
+  }
+
+  const userId = await getAuthUserIdByEmail(email);
+  if (!userId) {
+    json(res, 404, { error: "Student account not found." });
+    return;
+  }
+
+  try {
+    await updateSupabaseAuthPassword(userId, password);
+  } catch (error) {
+    json(res, 502, {
+      error: safeText(error?.message) || "Unable to update student password.",
+    });
+    return;
+  }
+
+  json(res, 200, {
+    ok: true,
+    student: { email },
+    savedTo: "supabase_auth",
+  });
+}
+
 async function handleStudentSignupBypass(req, res) {
   json(res, 410, {
     error:
@@ -2695,6 +2801,10 @@ async function route(req, res) {
 
     if (req.method === "POST" && pathname === "/api/student-auth/signup-bypass") {
       await handleStudentSignupBypass(req, res);
+      return;
+    }
+    if (req.method === "POST" && pathname === "/api/student-auth/reset-password-direct") {
+      await handleStudentPasswordResetDirect(req, res);
       return;
     }
 

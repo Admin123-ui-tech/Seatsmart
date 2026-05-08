@@ -2,34 +2,47 @@
 
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { Suspense, useEffect, useState } from "react";
-import { AlertCircle, CheckCircle2, KeyRound } from "lucide-react";
-import { supabase } from "@/lib/supabase";
+import { Suspense, useState } from "react";
+import { AlertCircle, CheckCircle2, KeyRound, Save } from "lucide-react";
+import PasswordField from "@/components/PasswordField";
 import BackButton from "@/components/BackButton";
+import { getApiBaseUrl } from "@/lib/api";
 
-const RESEND_COOLDOWN_SECONDS = 60;
+const RESET_REQUEST_TIMEOUT_MS = Number(
+  process.env.NEXT_PUBLIC_STUDENT_PASSWORD_RESET_TIMEOUT_MS || 15000,
+);
 
-function getResetRedirectUrl() {
-  const configuredBaseUrl =
-    process.env.NEXT_PUBLIC_SITE_URL?.trim() ||
-    process.env.NEXT_PUBLIC_WEB_URL?.trim();
-  if (configuredBaseUrl) {
-    return `${configuredBaseUrl.replace(/\/$/, "")}/student/reset-password`;
-  }
-  return `${window.location.origin}/student/reset-password`;
+function buildApiUrl(path) {
+  return new URL(path, getApiBaseUrl()).toString();
 }
 
-function toFriendlyResetError(message) {
-  const raw = String(message || "");
-  const normalized = raw.toLowerCase();
+async function resetStudentPassword(email, password) {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), RESET_REQUEST_TIMEOUT_MS);
 
-  if (normalized.includes("rate limit")) {
-    return "Too many reset attempts. Please wait a few minutes and try again.";
+  try {
+    const response = await fetch(buildApiUrl("/api/student-auth/reset-password-direct"), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      credentials: "include",
+      body: JSON.stringify({ email, password }),
+      signal: controller.signal,
+    });
+
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      throw new Error(payload.error || `Request failed (${response.status}).`);
+    }
+
+    return payload;
+  } catch (error) {
+    if (error?.name === "AbortError") {
+      throw new Error("Password reset request timed out. Please try again.");
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeoutId);
   }
-  if (normalized.includes("redirect")) {
-    return "Reset link redirect is not configured in Supabase. Add your web URL in Supabase Auth URL settings.";
-  }
-  return raw || "Unable to send reset email.";
 }
 
 function StudentForgotPasswordContent() {
@@ -43,64 +56,40 @@ function StudentForgotPasswordContent() {
       : "";
 
   const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
-  const [cooldownUntil, setCooldownUntil] = useState(0);
-  const [cooldownLeft, setCooldownLeft] = useState(0);
-
-  useEffect(() => {
-    if (!cooldownUntil) {
-      setCooldownLeft(0);
-      return;
-    }
-
-    const update = () => {
-      const remaining = Math.max(
-        0,
-        Math.ceil((cooldownUntil - Date.now()) / 1000),
-      );
-      setCooldownLeft(remaining);
-    };
-
-    update();
-    const timer = window.setInterval(update, 1000);
-    return () => window.clearInterval(timer);
-  }, [cooldownUntil]);
 
   async function handleSubmit(event) {
     event.preventDefault();
     setError("");
     setSuccess("");
 
-    if (cooldownLeft > 0) {
-      setError(
-        `Please wait ${cooldownLeft}s before requesting another reset link.`,
-      );
+    const normalizedEmail = email.trim().toLowerCase();
+    if (!normalizedEmail || !password || !confirmPassword) {
+      setError("Email, new password, and confirm password are required.");
       return;
     }
-
-    if (!email.trim()) {
-      setError("Email is required.");
+    if (password.length < 6) {
+      setError("Password must be at least 6 characters.");
+      return;
+    }
+    if (password !== confirmPassword) {
+      setError("Password and confirm password do not match.");
       return;
     }
 
     setLoading(true);
-    const { error: resetError } = await supabase.auth.resetPasswordForEmail(
-      email.trim().toLowerCase(),
-      {
-        redirectTo: getResetRedirectUrl(),
-      },
-    );
-    setLoading(false);
-
-    if (resetError) {
-      setError(toFriendlyResetError(resetError.message));
-      return;
+    try {
+      await resetStudentPassword(normalizedEmail, password);
+      setSuccess("Password updated successfully. You can sign in now.");
+    } catch (resetError) {
+      setError(String(resetError?.message || "Unable to update password."));
+    } finally {
+      setLoading(false);
     }
-
-    setCooldownUntil(Date.now() + RESEND_COOLDOWN_SECONDS * 1000);
-    setSuccess("Password reset link sent to your email. Check spam/junk if not in inbox.");
   }
 
   return (
@@ -112,7 +101,7 @@ function StudentForgotPasswordContent() {
           </div>
           <h1 className="text-2xl font-bold">Forgot Password</h1>
           <p className="text-slate-200 text-sm mt-1">
-            We will send a password reset link to your email
+            Set a new password directly without email reset link
           </p>
         </div>
 
@@ -131,6 +120,26 @@ function StudentForgotPasswordContent() {
             />
           </div>
 
+          <PasswordField
+            label="New Password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            required
+            minLength={6}
+            autoComplete="new-password"
+            placeholder="Enter new password"
+          />
+
+          <PasswordField
+            label="Confirm New Password"
+            value={confirmPassword}
+            onChange={(e) => setConfirmPassword(e.target.value)}
+            required
+            minLength={6}
+            autoComplete="new-password"
+            placeholder="Confirm new password"
+          />
+
           {error ? (
             <div className="bg-red-50 border border-red-200 rounded-lg p-3 text-sm text-red-700 flex items-start space-x-2">
               <AlertCircle className="h-4 w-4 mt-0.5 flex-shrink-0" />
@@ -147,14 +156,13 @@ function StudentForgotPasswordContent() {
 
           <button
             type="submit"
-            disabled={loading || cooldownLeft > 0}
+            disabled={loading}
             className="w-full bg-orange-500 hover:bg-orange-600 text-white font-semibold rounded-lg py-3 transition-colors disabled:opacity-60"
           >
-            {loading
-              ? "Sending reset link..."
-              : cooldownLeft > 0
-                ? `Try again in ${cooldownLeft}s`
-                : "Send Reset Link"}
+            <span className="inline-flex items-center justify-center space-x-2">
+              <Save className="h-4 w-4" />
+              <span>{loading ? "Updating..." : "Update Password"}</span>
+            </span>
           </button>
 
           <div className="flex justify-center">
