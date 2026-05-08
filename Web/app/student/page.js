@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
   Search,
@@ -18,7 +18,7 @@ import { supabase } from "@/lib/supabase";
 import { getFriendlySupabaseError } from "@/lib/students";
 import { apiGet } from "@/lib/api";
 
-export default function StudentPortalPage() {
+function StudentPortalContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const [centerFromQuery, setCenterFromQuery] = useState("");
@@ -333,5 +333,13 @@ export default function StudentPortalPage() {
         ) : null}
       </div>
     </div>
+  );
+}
+
+export default function StudentPortalPage() {
+  return (
+    <Suspense fallback={<div className="min-h-screen bg-[#f8f5ee]" />}>
+      <StudentPortalContent />
+    </Suspense>
   );
 }

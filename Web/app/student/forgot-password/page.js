@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { useEffect, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import { AlertCircle, CheckCircle2, KeyRound } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 
@@ -31,7 +31,7 @@ function toFriendlyResetError(message) {
   return raw || "Unable to send reset email.";
 }
 
-export default function StudentForgotPasswordPage() {
+function StudentForgotPasswordContent() {
   const searchParams = useSearchParams();
   const center = searchParams.get("center") || "";
   const centerId = searchParams.get("centerId") || "";
@@ -168,5 +168,13 @@ export default function StudentForgotPasswordPage() {
         </form>
       </div>
     </div>
+  );
+}
+
+export default function StudentForgotPasswordPage() {
+  return (
+    <Suspense fallback={<div className="min-h-screen bg-[#f8f5ee]" />}>
+      <StudentForgotPasswordContent />
+    </Suspense>
   );
 }

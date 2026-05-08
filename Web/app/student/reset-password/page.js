@@ -2,12 +2,12 @@
 
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { useEffect, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import { AlertCircle, CheckCircle2, KeyRound, Save } from "lucide-react";
 import PasswordField from "@/components/PasswordField";
 import { supabase } from "@/lib/supabase";
 
-export default function StudentResetPasswordPage() {
+function StudentResetPasswordContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const center = searchParams.get("center") || "";
@@ -177,5 +177,13 @@ export default function StudentResetPasswordPage() {
         </form>
       </div>
     </div>
+  );
+}
+
+export default function StudentResetPasswordPage() {
+  return (
+    <Suspense fallback={<div className="min-h-screen bg-[#f8f5ee]" />}>
+      <StudentResetPasswordContent />
+    </Suspense>
   );
 }

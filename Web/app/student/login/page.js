@@ -2,12 +2,12 @@
 
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { useState } from "react";
+import { Suspense, useState } from "react";
 import { AlertCircle, GraduationCap, LogIn } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import PasswordField from "@/components/PasswordField";
 
-export default function StudentLoginPage() {
+function StudentLoginContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const center = searchParams.get("center") || "";
@@ -125,5 +125,13 @@ export default function StudentLoginPage() {
         </form>
       </div>
     </div>
+  );
+}
+
+export default function StudentLoginPage() {
+  return (
+    <Suspense fallback={<div className="min-h-screen bg-[#f8f5ee]" />}>
+      <StudentLoginContent />
+    </Suspense>
   );
 }

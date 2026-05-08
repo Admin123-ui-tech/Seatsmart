@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { useState } from "react";
+import { Suspense, useState } from "react";
 import { AlertCircle, CheckCircle2, GraduationCap, UserPlus } from "lucide-react";
 import PasswordField from "@/components/PasswordField";
 import { supabase } from "@/lib/supabase";
@@ -16,7 +16,7 @@ function parseSignupError(message) {
   return message || "Unable to create account.";
 }
 
-export default function StudentSignupPage() {
+function StudentSignupContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const center = searchParams.get("center") || "";
@@ -225,5 +225,13 @@ export default function StudentSignupPage() {
         </form>
       </div>
     </div>
+  );
+}
+
+export default function StudentSignupPage() {
+  return (
+    <Suspense fallback={<div className="min-h-screen bg-[#f8f5ee]" />}>
+      <StudentSignupContent />
+    </Suspense>
   );
 }
