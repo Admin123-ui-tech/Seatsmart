@@ -92,14 +92,23 @@ const adminEmail = String(process.env.ADMIN_EMAIL || "")
   .trim()
   .toLowerCase();
 const adminPassword = String(process.env.ADMIN_PASSWORD || "");
+const superAdminEmail = String(process.env.SUPER_ADMIN_EMAIL || "")
+  .trim()
+  .toLowerCase();
+const superAdminPassword = String(process.env.SUPER_ADMIN_PASSWORD || "");
 const ADMIN_SETTINGS_EMAIL_KEY = "admin_email";
 const ADMIN_SETTINGS_PASSWORD_KEY = "admin_password";
 const ADMIN_CREDENTIALS_PRIMARY_KEY = "primary";
 const adminSessionSecret =
   String(process.env.ADMIN_SESSION_SECRET || "").trim() ||
   `${adminEmail}:${adminPassword}`;
+const superAdminSessionSecret =
+  String(process.env.SUPER_ADMIN_SESSION_SECRET || "").trim() ||
+  `${superAdminEmail}:${superAdminPassword}`;
 const ADMIN_SESSION_TTL_MS = 1000 * 60 * 60 * 12;
+const SUPER_ADMIN_SESSION_TTL_MS = 1000 * 60 * 60 * 12;
 const ADMIN_COOKIE_NAME = "seatsmart_admin_session";
+const SUPER_ADMIN_COOKIE_NAME = "seatsmart_super_admin_session";
 const isProduction = String(process.env.NODE_ENV || "").toLowerCase() === "production";
 const adminCookieSameSite = (() => {
   const raw = safeText(process.env.ADMIN_COOKIE_SAMESITE).toLowerCase();
@@ -333,6 +342,10 @@ function hasAdminCredentials(credentials) {
   );
 }
 
+function hasSuperAdminCredentials() {
+  return !!superAdminEmail && !!superAdminPassword;
+}
+
 async function getAdminCredentialsFromAdminTable() {
   const result = await pool.query(
     `SELECT email, password
@@ -429,9 +442,21 @@ function getAdminCookieToken(req) {
   return safeText(cookies[ADMIN_COOKIE_NAME]);
 }
 
+function getSuperAdminCookieToken(req) {
+  const cookies = parseCookies(req);
+  return safeText(cookies[SUPER_ADMIN_COOKIE_NAME]);
+}
+
 function signToken(value) {
   return crypto
     .createHmac("sha256", adminSessionSecret)
+    .update(value)
+    .digest("base64url");
+}
+
+function signSuperAdminToken(value) {
+  return crypto
+    .createHmac("sha256", superAdminSessionSecret)
     .update(value)
     .digest("base64url");
 }
@@ -444,6 +469,17 @@ function createAdminSession(email) {
   };
   const encodedPayload = Buffer.from(JSON.stringify(payload), "utf8").toString("base64url");
   const signature = signToken(encodedPayload);
+  return `${encodedPayload}.${signature}`;
+}
+
+function createSuperAdminSession(email) {
+  const payload = {
+    email: normalizeEmail(email),
+    createdAt: Date.now(),
+    expiresAt: Date.now() + SUPER_ADMIN_SESSION_TTL_MS,
+  };
+  const encodedPayload = Buffer.from(JSON.stringify(payload), "utf8").toString("base64url");
+  const signature = signSuperAdminToken(encodedPayload);
   return `${encodedPayload}.${signature}`;
 }
 
@@ -477,6 +513,33 @@ function readAdminSession(token) {
   };
 }
 
+function readSuperAdminSession(token) {
+  if (!token) return null;
+  const parts = token.split(".");
+  if (parts.length !== 2) return null;
+
+  const [encodedPayload, signature] = parts;
+  if (!encodedPayload || !signature) return null;
+
+  const expectedSignature = signSuperAdminToken(encodedPayload);
+  if (signature !== expectedSignature) return null;
+
+  let payload;
+  try {
+    payload = JSON.parse(Buffer.from(encodedPayload, "base64url").toString("utf8"));
+  } catch {
+    return null;
+  }
+
+  if (!payload?.email || !payload?.expiresAt || !payload?.createdAt) return null;
+  if (Date.now() > Number(payload.expiresAt)) return null;
+
+  return {
+    email: normalizeEmail(payload.email),
+    createdAt: Number(payload.createdAt),
+  };
+}
+
 function deleteAdminSession(token) {
   return !!token;
 }
@@ -487,9 +550,20 @@ function buildAdminCookie(token, expiresInMs = ADMIN_SESSION_TTL_MS) {
   return `${ADMIN_COOKIE_NAME}=${encodeURIComponent(token)}; Path=/; HttpOnly; SameSite=${adminCookieSameSite}; Max-Age=${maxAgeSeconds}${secure}`;
 }
 
+function buildSuperAdminCookie(token, expiresInMs = SUPER_ADMIN_SESSION_TTL_MS) {
+  const maxAgeSeconds = Math.max(0, Math.floor(expiresInMs / 1000));
+  const secure = isProduction || adminCookieSameSite === "None" ? "; Secure" : "";
+  return `${SUPER_ADMIN_COOKIE_NAME}=${encodeURIComponent(token)}; Path=/; HttpOnly; SameSite=${adminCookieSameSite}; Max-Age=${maxAgeSeconds}${secure}`;
+}
+
 function buildExpiredAdminCookie() {
   const secure = isProduction || adminCookieSameSite === "None" ? "; Secure" : "";
   return `${ADMIN_COOKIE_NAME}=; Path=/; HttpOnly; SameSite=${adminCookieSameSite}; Max-Age=0${secure}`;
+}
+
+function buildExpiredSuperAdminCookie() {
+  const secure = isProduction || adminCookieSameSite === "None" ? "; Secure" : "";
+  return `${SUPER_ADMIN_COOKIE_NAME}=; Path=/; HttpOnly; SameSite=${adminCookieSameSite}; Max-Age=0${secure}`;
 }
 
 function isOriginAllowed(req) {
@@ -507,6 +581,35 @@ function requireAdminSession(req, res) {
     return null;
   }
   return session;
+}
+
+function requireSuperAdminSession(req, res) {
+  const token = getBearerToken(req) || getSuperAdminCookieToken(req);
+  const session = readSuperAdminSession(token);
+  if (!session) {
+    json(res, 401, { error: "Super admin authentication required." });
+    return null;
+  }
+  return session;
+}
+
+function requireAdminOrSuperAdminSession(req, res) {
+  const bearer = getBearerToken(req);
+  const adminToken = bearer || getAdminCookieToken(req);
+  const superAdminToken = bearer || getSuperAdminCookieToken(req);
+
+  const adminSession = readAdminSession(adminToken);
+  if (adminSession) {
+    return { role: "admin", email: adminSession.email };
+  }
+
+  const superSession = readSuperAdminSession(superAdminToken);
+  if (superSession) {
+    return { role: "super_admin", email: superSession.email };
+  }
+
+  json(res, 401, { error: "Admin authentication required." });
+  return null;
 }
 
 async function fetchSupabaseUser(accessToken) {
@@ -2597,6 +2700,434 @@ async function handleAdminLogout(req, res) {
   );
 }
 
+async function handleSuperAdminLogin(req, res) {
+  if (
+    !enforceRateLimit(
+      req,
+      res,
+      "super-admin-login",
+      10 * 60 * 1000,
+      ADMIN_LOGIN_RATE_LIMIT_MAX,
+      "Too many super admin login attempts. Please wait and try again.",
+    )
+  ) {
+    return;
+  }
+
+  if (!hasSuperAdminCredentials()) {
+    json(res, 500, {
+      error: "Super admin credentials are not configured on the API server.",
+    });
+    return;
+  }
+
+  const body = await readBody(req);
+  if (!isObject(body)) {
+    json(res, 400, { error: "Invalid request body." });
+    return;
+  }
+
+  const email = normalizeEmail(body.email);
+  const password = String(body.password || "");
+
+  if (!email || !password) {
+    json(res, 400, { error: "Email and password are required." });
+    return;
+  }
+
+  if (email !== superAdminEmail || password !== superAdminPassword) {
+    json(res, 401, { error: "Invalid super admin email or password." });
+    return;
+  }
+
+  const token = createSuperAdminSession(email);
+  json(
+    res,
+    200,
+    {
+      ok: true,
+      superAdmin: { email },
+      expiresInMs: SUPER_ADMIN_SESSION_TTL_MS,
+      sessionToken: token,
+    },
+    {
+      "Set-Cookie": buildSuperAdminCookie(token),
+    },
+  );
+}
+
+async function handleSuperAdminSession(req, res) {
+  const token = getBearerToken(req) || getSuperAdminCookieToken(req);
+
+  const session = readSuperAdminSession(token);
+  if (!session) {
+    json(res, 401, {
+      authenticated: false,
+      error: "Super admin session is invalid or expired.",
+    });
+    return;
+  }
+
+  json(res, 200, {
+    authenticated: true,
+    superAdmin: { email: session.email },
+  });
+}
+
+async function handleSuperAdminLogout(req, res) {
+  const token = getBearerToken(req) || getSuperAdminCookieToken(req);
+  if (token) deleteAdminSession(token);
+  json(
+    res,
+    200,
+    { ok: true },
+    {
+      "Set-Cookie": buildExpiredSuperAdminCookie(),
+    },
+  );
+}
+
+function normalizeAdminRole(value, fallback = "admin") {
+  const normalized = safeText(value || fallback).toLowerCase();
+  if (!normalized) return fallback;
+  return normalized;
+}
+
+function normalizeAdminStatus(value, fallback = "active") {
+  const normalized = safeText(value || fallback).toLowerCase();
+  if (normalized !== "active" && normalized !== "inactive") return fallback;
+  return normalized;
+}
+
+function normalizeJsonIdArray(value) {
+  if (value === undefined || value === null) return null;
+  if (Array.isArray(value)) {
+    const next = value.map((item) => safeText(item)).filter(Boolean);
+    return next.length > 0 ? next : null;
+  }
+
+  const raw = safeText(value);
+  if (!raw) return null;
+
+  try {
+    const parsed = JSON.parse(raw);
+    if (Array.isArray(parsed)) {
+      const next = parsed.map((item) => safeText(item)).filter(Boolean);
+      return next.length > 0 ? next : null;
+    }
+  } catch {
+    const next = raw
+      .split(",")
+      .map((item) => safeText(item))
+      .filter(Boolean);
+    return next.length > 0 ? next : null;
+  }
+
+  return null;
+}
+
+async function handleSuperAdminDashboard(req, res) {
+  const statsResult = await pool.query(
+    `SELECT
+      (SELECT COUNT(*)::int FROM admins) AS total_admins,
+      (SELECT COUNT(*)::int FROM colleges) AS total_colleges,
+      (SELECT COUNT(*)::int FROM exam_centers) AS total_exam_centers,
+      (SELECT COUNT(*)::int FROM rooms) AS total_rooms,
+      (SELECT COUNT(*)::int FROM students) AS total_students,
+      (
+        SELECT COUNT(DISTINCT exam_center)::int
+        FROM students
+        WHERE exam_center IS NOT NULL AND exam_center <> ''
+      ) AS total_qr_codes`,
+  );
+
+  const recentAdminsResult = await pool.query(
+    `SELECT full_name, email, status
+     FROM admins
+     ORDER BY created_at DESC
+     LIMIT 5`,
+  );
+
+  const health = {
+    api: { ok: true, message: "API server reachable" },
+    database: { ok: false, message: "Not checked" },
+    superAdminAuth: {
+      ok: hasSuperAdminCredentials(),
+      message: hasSuperAdminCredentials()
+        ? "SUPER_ADMIN_EMAIL / SUPER_ADMIN_PASSWORD configured"
+        : "Missing SUPER_ADMIN_EMAIL or SUPER_ADMIN_PASSWORD",
+    },
+  };
+
+  try {
+    await pool.query("SELECT 1");
+    health.database = { ok: true, message: "Database connection OK" };
+  } catch (error) {
+    health.database = {
+      ok: false,
+      message: error.message || "Database connection failed",
+    };
+  }
+
+  const stats = statsResult.rows?.[0] || {};
+  const recentAdminMessages = (recentAdminsResult.rows || []).map((row) => {
+    const fullName = safeText(row.full_name);
+    const email = safeText(row.email);
+    const status = normalizeAdminStatus(row.status, "active");
+    if (fullName) return `Admin ${fullName} (${status})`;
+    return `Admin ${email || "unknown"} (${status})`;
+  });
+
+  json(res, 200, {
+    stats: {
+      total_admins: Number(stats.total_admins || 0),
+      total_colleges: Number(stats.total_colleges || 0),
+      total_exam_centers: Number(stats.total_exam_centers || 0),
+      total_rooms: Number(stats.total_rooms || 0),
+      total_students: Number(stats.total_students || 0),
+      total_qr_codes: Number(stats.total_qr_codes || 0),
+    },
+    recentActivity: [...RECENT_ACTIVITY, ...recentAdminMessages].slice(0, 10),
+    systemHealth: health,
+  });
+}
+
+async function handleSuperAdminAdminsGet(req, res, url) {
+  const search = safeText(url.searchParams.get("search")).toLowerCase();
+  const role = safeText(url.searchParams.get("role")).toLowerCase();
+  const status = safeText(url.searchParams.get("status")).toLowerCase();
+  const page = Math.max(1, toIntOrNull(url.searchParams.get("page")) || 1);
+  const pageSize = Math.max(
+    1,
+    Math.min(100, toIntOrNull(url.searchParams.get("pageSize")) || 20),
+  );
+
+  const params = [];
+  const whereClauses = [];
+
+  if (search) {
+    params.push(`%${search}%`);
+    whereClauses.push(
+      `(LOWER(full_name) LIKE $${params.length} OR LOWER(email) LIKE $${params.length} OR LOWER(COALESCE(phone, '')) LIKE $${params.length})`,
+    );
+  }
+  if (role) {
+    params.push(role);
+    whereClauses.push(`LOWER(role) = $${params.length}`);
+  }
+  if (status) {
+    params.push(status);
+    whereClauses.push(`LOWER(status) = $${params.length}`);
+  }
+
+  const whereSql = whereClauses.length ? `WHERE ${whereClauses.join(" AND ")}` : "";
+  const offset = (page - 1) * pageSize;
+
+  const totalResult = await pool.query(
+    `SELECT COUNT(*)::int AS total FROM admins ${whereSql}`,
+    params,
+  );
+
+  const rowsParams = [...params, pageSize, offset];
+  const rowsResult = await pool.query(
+    `SELECT
+      id,
+      full_name,
+      email,
+      phone,
+      role,
+      status,
+      assigned_college_ids,
+      assigned_center_ids,
+      created_at
+     FROM admins
+     ${whereSql}
+     ORDER BY created_at DESC
+     LIMIT $${rowsParams.length - 1} OFFSET $${rowsParams.length}`,
+    rowsParams,
+  );
+
+  json(res, 200, {
+    rows: rowsResult.rows || [],
+    total: Number(totalResult.rows?.[0]?.total || 0),
+    page,
+    pageSize,
+  });
+}
+
+async function handleSuperAdminAdminsOptions(req, res) {
+  const [collegesResult, centersResult] = await Promise.all([
+    pool.query("SELECT id, name FROM colleges ORDER BY name ASC"),
+    pool.query("SELECT id, name FROM exam_centers ORDER BY name ASC"),
+  ]);
+
+  json(res, 200, {
+    colleges: collegesResult.rows || [],
+    centers: centersResult.rows || [],
+  });
+}
+
+async function handleSuperAdminAdminsCreate(req, res) {
+  const body = await readBody(req);
+  if (!isObject(body)) {
+    json(res, 400, { error: "Invalid request body." });
+    return;
+  }
+
+  const fullName = safeText(body.full_name || body.fullName);
+  const email = normalizeEmail(body.email);
+  const phone = safeText(body.phone) || null;
+  const role = normalizeAdminRole(body.role, "admin");
+  const status = normalizeAdminStatus(body.status, "active");
+  const assignedCollegeIds = normalizeJsonIdArray(
+    body.assigned_college_ids || body.assignedCollegeIds,
+  );
+  const assignedCenterIds = normalizeJsonIdArray(
+    body.assigned_center_ids || body.assignedCenterIds,
+  );
+
+  if (!fullName || !email) {
+    json(res, 400, { error: "full_name and email are required." });
+    return;
+  }
+
+  if (!isValidEmail(email)) {
+    json(res, 400, { error: "Invalid email address." });
+    return;
+  }
+
+  const result = await pool.query(
+    `INSERT INTO admins
+      (full_name, email, phone, role, status, assigned_college_ids, assigned_center_ids, created_at)
+     VALUES
+      ($1, $2, $3, $4, $5, $6::jsonb, $7::jsonb, now())
+     RETURNING *`,
+    [
+      fullName,
+      email,
+      phone,
+      role,
+      status,
+      assignedCollegeIds,
+      assignedCenterIds,
+    ],
+  );
+
+  json(res, 200, { ok: true, row: result.rows[0] });
+}
+
+async function handleSuperAdminAdminsUpdate(req, res) {
+  const body = await readBody(req);
+  if (!isObject(body)) {
+    json(res, 400, { error: "Invalid request body." });
+    return;
+  }
+
+  const id = normalizeUuid(body.id);
+  if (!id) {
+    json(res, 400, { error: "id is required." });
+    return;
+  }
+
+  const fullName = safeText(body.full_name || body.fullName);
+  const email = normalizeEmail(body.email);
+  const phone = safeText(body.phone) || null;
+  const role = normalizeAdminRole(body.role, "admin");
+  const status = normalizeAdminStatus(body.status, "active");
+  const assignedCollegeIds = normalizeJsonIdArray(
+    body.assigned_college_ids || body.assignedCollegeIds,
+  );
+  const assignedCenterIds = normalizeJsonIdArray(
+    body.assigned_center_ids || body.assignedCenterIds,
+  );
+
+  if (!fullName || !email) {
+    json(res, 400, { error: "full_name and email are required." });
+    return;
+  }
+
+  if (!isValidEmail(email)) {
+    json(res, 400, { error: "Invalid email address." });
+    return;
+  }
+
+  const result = await pool.query(
+    `UPDATE admins
+     SET full_name = $2,
+         email = $3,
+         phone = $4,
+         role = $5,
+         status = $6,
+         assigned_college_ids = $7::jsonb,
+         assigned_center_ids = $8::jsonb
+     WHERE id = $1::uuid
+     RETURNING *`,
+    [
+      id,
+      fullName,
+      email,
+      phone,
+      role,
+      status,
+      assignedCollegeIds,
+      assignedCenterIds,
+    ],
+  );
+
+  if (!result.rows[0]) {
+    json(res, 404, { error: "Admin not found." });
+    return;
+  }
+
+  json(res, 200, { ok: true, row: result.rows[0] });
+}
+
+async function handleSuperAdminAdminsDelete(req, res) {
+  const body = await readBody(req);
+  const id = normalizeUuid(body.id);
+  if (!id) {
+    json(res, 400, { error: "id is required." });
+    return;
+  }
+
+  const deleted = await pool.query(
+    "DELETE FROM admins WHERE id = $1::uuid RETURNING id",
+    [id],
+  );
+
+  if (!deleted.rows[0]) {
+    json(res, 404, { error: "Admin not found." });
+    return;
+  }
+
+  json(res, 200, { ok: true });
+}
+
+async function handleSuperAdminAdminsToggleStatus(req, res) {
+  const body = await readBody(req);
+  const id = normalizeUuid(body.id);
+  if (!id) {
+    json(res, 400, { error: "id is required." });
+    return;
+  }
+
+  const status = normalizeAdminStatus(body.status, "active");
+  const result = await pool.query(
+    `UPDATE admins
+     SET status = $2
+     WHERE id = $1::uuid
+     RETURNING *`,
+    [id, status],
+  );
+
+  if (!result.rows[0]) {
+    json(res, 404, { error: "Admin not found." });
+    return;
+  }
+
+  json(res, 200, { ok: true, row: result.rows[0] });
+}
+
 const ADMIN_WRITE_ROUTES = new Set([
   "/api/colleges/create",
   "/api/colleges/update",
@@ -2627,6 +3158,42 @@ const ADMIN_READ_ROUTES = new Set([
   "/api/settings",
 ]);
 
+const SUPER_ADMIN_WRITE_ROUTES = new Set([
+  "/api/super-admin/admins/create",
+  "/api/super-admin/admins/update",
+  "/api/super-admin/admins/delete",
+  "/api/super-admin/admins/toggle-status",
+  "/api/super-admin/colleges/create",
+  "/api/super-admin/colleges/update",
+  "/api/super-admin/colleges/delete",
+  "/api/super-admin/exam-centers/create",
+  "/api/super-admin/exam-centers/update",
+  "/api/super-admin/exam-centers/delete",
+  "/api/super-admin/rooms/create",
+  "/api/super-admin/rooms/update",
+  "/api/super-admin/rooms/delete",
+  "/api/super-admin/students/upload",
+  "/api/super-admin/students/create",
+  "/api/super-admin/students/update",
+  "/api/super-admin/students/delete",
+  "/api/super-admin/seating-plan/generate",
+  "/api/super-admin/settings/upsert",
+]);
+
+const SUPER_ADMIN_READ_ROUTES = new Set([
+  "/api/super-admin/dashboard",
+  "/api/super-admin/system/health",
+  "/api/super-admin/admins",
+  "/api/super-admin/admins/options",
+  "/api/super-admin/colleges",
+  "/api/super-admin/exam-centers",
+  "/api/super-admin/rooms",
+  "/api/super-admin/centers",
+  "/api/super-admin/students/options",
+  "/api/super-admin/students",
+  "/api/super-admin/settings",
+]);
+
 async function route(req, res) {
   if (!isOriginAllowed(req)) {
     json(res, 403, { error: "Origin not allowed." });
@@ -2643,6 +3210,16 @@ async function route(req, res) {
   const { pathname } = url;
 
   try {
+    if (req.method === "GET" && SUPER_ADMIN_READ_ROUTES.has(pathname)) {
+      const session = requireSuperAdminSession(req, res);
+      if (!session) return;
+    }
+
+    if (req.method === "POST" && SUPER_ADMIN_WRITE_ROUTES.has(pathname)) {
+      const session = requireSuperAdminSession(req, res);
+      if (!session) return;
+    }
+
     if (req.method === "GET" && ADMIN_READ_ROUTES.has(pathname)) {
       const session = requireAdminSession(req, res);
       if (!session) return;
@@ -2691,6 +3268,146 @@ async function route(req, res) {
     }
     if (req.method === "POST" && pathname === "/api/admin/logout") {
       await handleAdminLogout(req, res);
+      return;
+    }
+
+    if (req.method === "POST" && pathname === "/api/super-admin/login") {
+      await handleSuperAdminLogin(req, res);
+      return;
+    }
+    if (req.method === "GET" && pathname === "/api/super-admin/session") {
+      await handleSuperAdminSession(req, res);
+      return;
+    }
+    if (req.method === "POST" && pathname === "/api/super-admin/logout") {
+      await handleSuperAdminLogout(req, res);
+      return;
+    }
+
+    if (req.method === "GET" && pathname === "/api/super-admin/dashboard") {
+      await handleSuperAdminDashboard(req, res);
+      return;
+    }
+    if (req.method === "GET" && pathname === "/api/super-admin/system/health") {
+      await handleSystemHealth(req, res);
+      return;
+    }
+    if (req.method === "GET" && pathname === "/api/super-admin/admins") {
+      await handleSuperAdminAdminsGet(req, res, url);
+      return;
+    }
+    if (req.method === "GET" && pathname === "/api/super-admin/admins/options") {
+      await handleSuperAdminAdminsOptions(req, res);
+      return;
+    }
+    if (req.method === "POST" && pathname === "/api/super-admin/admins/create") {
+      await handleSuperAdminAdminsCreate(req, res);
+      return;
+    }
+    if (req.method === "POST" && pathname === "/api/super-admin/admins/update") {
+      await handleSuperAdminAdminsUpdate(req, res);
+      return;
+    }
+    if (req.method === "POST" && pathname === "/api/super-admin/admins/delete") {
+      await handleSuperAdminAdminsDelete(req, res);
+      return;
+    }
+    if (req.method === "POST" && pathname === "/api/super-admin/admins/toggle-status") {
+      await handleSuperAdminAdminsToggleStatus(req, res);
+      return;
+    }
+
+    if (req.method === "GET" && pathname === "/api/super-admin/colleges") {
+      await handleColleges(req, res, url);
+      return;
+    }
+    if (req.method === "POST" && pathname === "/api/super-admin/colleges/create") {
+      await handleCollegeCreate(req, res);
+      return;
+    }
+    if (req.method === "POST" && pathname === "/api/super-admin/colleges/update") {
+      await handleCollegeUpdate(req, res);
+      return;
+    }
+    if (req.method === "POST" && pathname === "/api/super-admin/colleges/delete") {
+      await handleCollegeDelete(req, res);
+      return;
+    }
+
+    if (req.method === "GET" && pathname === "/api/super-admin/exam-centers") {
+      await handleExamCenters(req, res, url);
+      return;
+    }
+    if (req.method === "POST" && pathname === "/api/super-admin/exam-centers/create") {
+      await handleExamCenterCreate(req, res);
+      return;
+    }
+    if (req.method === "POST" && pathname === "/api/super-admin/exam-centers/update") {
+      await handleExamCenterUpdate(req, res);
+      return;
+    }
+    if (req.method === "POST" && pathname === "/api/super-admin/exam-centers/delete") {
+      await handleExamCenterDelete(req, res);
+      return;
+    }
+
+    if (req.method === "GET" && pathname === "/api/super-admin/rooms") {
+      await handleRooms(req, res, url);
+      return;
+    }
+    if (req.method === "POST" && pathname === "/api/super-admin/rooms/create") {
+      await handleRoomCreate(req, res);
+      return;
+    }
+    if (req.method === "POST" && pathname === "/api/super-admin/rooms/update") {
+      await handleRoomUpdate(req, res);
+      return;
+    }
+    if (req.method === "POST" && pathname === "/api/super-admin/rooms/delete") {
+      await handleRoomDelete(req, res);
+      return;
+    }
+
+    if (req.method === "GET" && pathname === "/api/super-admin/centers") {
+      await handleCentersOverview(req, res, url);
+      return;
+    }
+
+    if (req.method === "GET" && pathname === "/api/super-admin/students/options") {
+      await handleStudentOptions(req, res);
+      return;
+    }
+    if (req.method === "GET" && pathname === "/api/super-admin/students") {
+      await handleStudents(req, res, url);
+      return;
+    }
+    if (req.method === "POST" && pathname === "/api/super-admin/students/upload") {
+      await handleStudentsUpload(req, res);
+      return;
+    }
+    if (req.method === "POST" && pathname === "/api/super-admin/students/create") {
+      await handleStudentCreate(req, res);
+      return;
+    }
+    if (req.method === "POST" && pathname === "/api/super-admin/students/update") {
+      await handleStudentUpdate(req, res);
+      return;
+    }
+    if (req.method === "POST" && pathname === "/api/super-admin/students/delete") {
+      await handleStudentDelete(req, res);
+      return;
+    }
+
+    if (req.method === "POST" && pathname === "/api/super-admin/seating-plan/generate") {
+      await handleGenerateSeatingPlan(req, res);
+      return;
+    }
+    if (req.method === "GET" && pathname === "/api/super-admin/settings") {
+      await handleSettingsGet(req, res);
+      return;
+    }
+    if (req.method === "POST" && pathname === "/api/super-admin/settings/upsert") {
+      await handleSettingsUpsert(req, res);
       return;
     }
 

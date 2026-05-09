@@ -234,6 +234,49 @@ CREATE TABLE IF NOT EXISTS settings (
   updated_at timestamptz NOT NULL DEFAULT now()
 );
 
+-- Admin management
+CREATE TABLE IF NOT EXISTS admins (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  full_name text NOT NULL,
+  email text NOT NULL UNIQUE,
+  phone text,
+  role text NOT NULL DEFAULT 'admin',
+  status text NOT NULL DEFAULT 'active',
+  assigned_college_ids jsonb,
+  assigned_center_ids jsonb,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+
+ALTER TABLE admins
+  ADD COLUMN IF NOT EXISTS full_name text,
+  ADD COLUMN IF NOT EXISTS email text,
+  ADD COLUMN IF NOT EXISTS phone text,
+  ADD COLUMN IF NOT EXISTS role text,
+  ADD COLUMN IF NOT EXISTS status text,
+  ADD COLUMN IF NOT EXISTS assigned_college_ids jsonb,
+  ADD COLUMN IF NOT EXISTS assigned_center_ids jsonb,
+  ADD COLUMN IF NOT EXISTS created_at timestamptz;
+
+UPDATE admins SET role = COALESCE(NULLIF(role, ''), 'admin');
+UPDATE admins SET status = COALESCE(NULLIF(status, ''), 'active');
+UPDATE admins SET created_at = COALESCE(created_at, now());
+
+ALTER TABLE admins
+  ALTER COLUMN full_name SET NOT NULL,
+  ALTER COLUMN email SET NOT NULL,
+  ALTER COLUMN role SET NOT NULL,
+  ALTER COLUMN status SET NOT NULL,
+  ALTER COLUMN created_at SET NOT NULL;
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint WHERE conname = 'admins_email_unique'
+  ) THEN
+    ALTER TABLE admins ADD CONSTRAINT admins_email_unique UNIQUE (email);
+  END IF;
+END $$;
+
 -- Admin credentials (explicit table for admin auth visibility)
 CREATE TABLE IF NOT EXISTS admin_credentials (
   key text PRIMARY KEY,
