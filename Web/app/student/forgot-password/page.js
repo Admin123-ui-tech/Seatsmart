@@ -16,6 +16,19 @@ function buildApiUrl(path) {
   return new URL(path, getApiBaseUrl()).toString();
 }
 
+function getFriendlyResetError(error) {
+  const raw = String(error?.message || "");
+  const normalized = raw.toLowerCase();
+  if (
+    normalized.includes("missing supabase_url") ||
+    normalized.includes("supabase_service_role_key") ||
+    normalized.includes("not configured")
+  ) {
+    return "Password reset backend is not configured. Add SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY in API server env (Render), then redeploy.";
+  }
+  return raw || "Unable to update password.";
+}
+
 async function resetStudentPassword(email, password) {
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), RESET_REQUEST_TIMEOUT_MS);
@@ -89,7 +102,7 @@ function StudentForgotPasswordContent() {
       await resetStudentPassword(normalizedEmail, password);
       setSuccess("Password updated successfully. You can sign in now.");
     } catch (resetError) {
-      setError(String(resetError?.message || "Unable to update password."));
+      setError(getFriendlyResetError(resetError));
     } finally {
       setLoading(false);
     }

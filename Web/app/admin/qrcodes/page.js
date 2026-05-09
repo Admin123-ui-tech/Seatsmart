@@ -20,6 +20,26 @@ function normalizeBaseUrl(value) {
   return String(value || "").trim().replace(/\/+$/, "");
 }
 
+function isPrivateOrLocalHost(hostname) {
+  const host = String(hostname || "").trim().toLowerCase();
+  if (!host) return true;
+  if (LOCAL_HOSTS.has(host)) return true;
+
+  // IPv4 private ranges:
+  // 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16
+  const ipv4 = host.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
+  if (ipv4) {
+    const a = Number(ipv4[1]);
+    const b = Number(ipv4[2]);
+    if (a === 10) return true;
+    if (a === 192 && b === 168) return true;
+    if (a === 172 && b >= 16 && b <= 31) return true;
+  }
+
+  if (host.endsWith(".local")) return true;
+  return false;
+}
+
 function resolveQrBaseUrl() {
   const configuredBase = normalizeBaseUrl(
     process.env.NEXT_PUBLIC_SITE_URL || process.env.NEXT_PUBLIC_WEB_URL,
@@ -29,7 +49,7 @@ function resolveQrBaseUrl() {
   if (typeof window === "undefined") return "";
 
   const host = window.location.hostname;
-  if (LOCAL_HOSTS.has(host)) return "";
+  if (isPrivateOrLocalHost(host)) return "";
 
   return normalizeBaseUrl(window.location.origin);
 }
@@ -49,7 +69,7 @@ export default function QRCodesPage() {
     setBaseUrl(resolvedBaseUrl);
     if (!resolvedBaseUrl) {
       setWarning(
-        "Set NEXT_PUBLIC_SITE_URL in Web/.env.local to generate shareable QR links (example: https://yourdomain.com).",
+        "Set NEXT_PUBLIC_SITE_URL to your public domain (for example: https://seatsmart-psi.vercel.app). QR links are blocked on local/LAN hosts.",
       );
     } else {
       setWarning("");
