@@ -2565,7 +2565,8 @@ async function handleStudentQuickCheck(req, res) {
 
   if (hasExamDate && examDate) {
     params.push(examDate);
-    query += ` AND s.exam_date = $${params.length}::date`;
+    // Keep date-based filtering, but allow legacy rows where exam_date is not filled yet.
+    query += ` AND (s.exam_date = $${params.length}::date OR s.exam_date IS NULL)`;
   }
 
   if (mode === "optional") {
