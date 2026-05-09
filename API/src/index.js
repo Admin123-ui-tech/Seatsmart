@@ -2517,7 +2517,10 @@ async function handleStudentQuickCheck(req, res) {
     return;
   }
 
-  const params = [rollInput.toLowerCase()];
+  const rollLookup = rollInput.toLowerCase();
+  const centerLookup = centerToken.toLowerCase();
+
+  const params = [rollLookup];
   let query = `
     SELECT
       s.rollno,
@@ -2540,25 +2543,30 @@ async function handleStudentQuickCheck(req, res) {
     LEFT JOIN colleges c ON c.id = s.college_id
     LEFT JOIN exam_centers ec ON ec.id = s.center_id
     WHERE (
-      LOWER(s.rollno) = $1
+      LOWER(BTRIM(s.rollno)) = $1
       ${
         hasEnrollmentNumber
-          ? "OR LOWER(COALESCE(s.enrollment_number, '')) = $1"
+          ? "OR LOWER(BTRIM(COALESCE(s.enrollment_number, ''))) = $1"
           : ""
       }
     )
   `;
 
-  params.push(centerToken.toLowerCase());
+  params.push(centerLookup);
   const centerParamIndex = params.length;
   const centerConditions = [
-    `LOWER(COALESCE(ec.code, '')) = $${centerParamIndex}`,
-    `LOWER(COALESCE(ec.name, s.exam_center, '')) = $${centerParamIndex}`,
-    `LOWER(COALESCE(s.exam_center, '')) = $${centerParamIndex}`,
+    `LOWER(BTRIM(COALESCE(ec.code, ''))) = $${centerParamIndex}`,
+    `LOWER(BTRIM(COALESCE(ec.name, s.exam_center, ''))) = $${centerParamIndex}`,
+    `LOWER(BTRIM(COALESCE(s.exam_center, ''))) = $${centerParamIndex}`,
+    `LOWER(BTRIM(COALESCE(s.exam_center, ''))) IN (
+      SELECT LOWER(BTRIM(name))
+      FROM exam_centers
+      WHERE LOWER(BTRIM(code)) = $${centerParamIndex}
+    )`,
   ];
   if (hasExamCenterCode) {
     centerConditions.push(
-      `LOWER(COALESCE(s.exam_center_code, '')) = $${centerParamIndex}`,
+      `LOWER(BTRIM(COALESCE(s.exam_center_code, ''))) = $${centerParamIndex}`,
     );
   }
   query += ` AND (${centerConditions.join(" OR ")})`;
@@ -2571,11 +2579,11 @@ async function handleStudentQuickCheck(req, res) {
 
   if (mode === "optional") {
     params.push(name.toLowerCase());
-    query += ` AND LOWER(s.name) = $${params.length}`;
+    query += ` AND LOWER(BTRIM(s.name)) = $${params.length}`;
 
     if (hasExamShift && examShift) {
       params.push(examShift.toLowerCase());
-      query += ` AND LOWER(COALESCE(s.exam_shift, '')) = $${params.length}`;
+      query += ` AND LOWER(BTRIM(COALESCE(s.exam_shift, ''))) = $${params.length}`;
     }
 
     if (hasDob && dob) {
