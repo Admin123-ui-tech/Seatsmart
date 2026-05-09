@@ -336,11 +336,16 @@ EXECUTE FUNCTION sync_admin_credentials_from_settings();
 CREATE TABLE IF NOT EXISTS students (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   rollno text,
+  enrollment_number text,
   name text,
   room text,
   seat text,
   school_name text,
   exam_center text,
+  exam_center_code text,
+  exam_date date,
+  exam_shift text,
+  dob date,
   class_name text,
   college_id uuid,
   center_id uuid,
@@ -350,11 +355,16 @@ CREATE TABLE IF NOT EXISTS students (
 
 ALTER TABLE students
   ADD COLUMN IF NOT EXISTS rollno text,
+  ADD COLUMN IF NOT EXISTS enrollment_number text,
   ADD COLUMN IF NOT EXISTS name text,
   ADD COLUMN IF NOT EXISTS room text,
   ADD COLUMN IF NOT EXISTS seat text,
   ADD COLUMN IF NOT EXISTS school_name text,
   ADD COLUMN IF NOT EXISTS exam_center text,
+  ADD COLUMN IF NOT EXISTS exam_center_code text,
+  ADD COLUMN IF NOT EXISTS exam_date date,
+  ADD COLUMN IF NOT EXISTS exam_shift text,
+  ADD COLUMN IF NOT EXISTS dob date,
   ADD COLUMN IF NOT EXISTS class_name text,
   ADD COLUMN IF NOT EXISTS college_id uuid,
   ADD COLUMN IF NOT EXISTS center_id uuid,
@@ -448,7 +458,10 @@ BEGIN
 END $$;
 
 CREATE INDEX IF NOT EXISTS idx_students_rollno ON students(rollno);
+CREATE INDEX IF NOT EXISTS idx_students_enrollment_number ON students(enrollment_number);
+CREATE INDEX IF NOT EXISTS idx_students_exam_center_code ON students(exam_center_code);
 CREATE INDEX IF NOT EXISTS idx_students_exam_center ON students(exam_center);
+CREATE INDEX IF NOT EXISTS idx_students_exam_date ON students(exam_date);
 CREATE INDEX IF NOT EXISTS idx_students_school_name ON students(school_name);
 CREATE INDEX IF NOT EXISTS idx_students_class_name ON students(class_name);
 CREATE INDEX IF NOT EXISTS idx_students_college_id ON students(college_id);

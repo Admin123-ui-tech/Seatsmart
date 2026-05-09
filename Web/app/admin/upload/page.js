@@ -135,7 +135,8 @@ export default function UploadPage() {
         <h1 className="text-2xl font-bold text-slate-900">Upload Data</h1>
         <p className="text-slate-600 mt-1">
           Upload CSV/Excel with columns: Roll No, Student Name, Room No, Seat
-          No, School, Center, Class.
+          No, School, Center, Class. Optional: Exam Date, Exam Centre Code,
+          Exam Shift, Enrollment Number, DOB.
         </p>
       </section>
 
@@ -253,16 +254,27 @@ export default function UploadPage() {
             <table className="w-full">
               <thead className="bg-slate-50">
                 <tr>
-                  {["Roll No", "Student Name", "Class", "School", "Center", "Room", "Seat"].map(
-                    (title) => (
-                      <th
-                        key={title}
-                        className="px-4 py-3 text-left text-xs font-semibold text-slate-600 uppercase"
-                      >
-                        {title}
-                      </th>
-                    ),
-                  )}
+                  {[
+                    "Roll No",
+                    "Enrollment",
+                    "Student Name",
+                    "Class",
+                    "School",
+                    "Center",
+                    "Center Code",
+                    "Exam Date",
+                    "Shift",
+                    "DOB",
+                    "Room",
+                    "Seat",
+                  ].map((title) => (
+                    <th
+                      key={title}
+                      className="px-4 py-3 text-left text-xs font-semibold text-slate-600 uppercase"
+                    >
+                      {title}
+                    </th>
+                  ))}
                 </tr>
               </thead>
               <tbody>
@@ -274,10 +286,15 @@ export default function UploadPage() {
                     }`}
                   >
                     <td className="px-4 py-3 text-sm">{row.rollno}</td>
+                    <td className="px-4 py-3 text-sm">{row.enrollment_number || "-"}</td>
                     <td className="px-4 py-3 text-sm">{row.name}</td>
                     <td className="px-4 py-3 text-sm">{row.class_name}</td>
                     <td className="px-4 py-3 text-sm">{row.school_name}</td>
                     <td className="px-4 py-3 text-sm">{row.exam_center}</td>
+                    <td className="px-4 py-3 text-sm">{row.exam_center_code || "-"}</td>
+                    <td className="px-4 py-3 text-sm">{row.exam_date || "-"}</td>
+                    <td className="px-4 py-3 text-sm">{row.exam_shift || "-"}</td>
+                    <td className="px-4 py-3 text-sm">{row.dob || "-"}</td>
                     <td className="px-4 py-3 text-sm">{row.room}</td>
                     <td className="px-4 py-3 text-sm">{row.seat}</td>
                   </tr>

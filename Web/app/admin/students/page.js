@@ -291,9 +291,14 @@ export default function StudentsPage() {
               <tr>
                 {[
                   "Roll No",
+                  "Enrollment No",
                   "Student Name",
                   "Class",
                   "School / College",
+                  "Exam Date",
+                  "Shift",
+                  "DOB",
+                  "Center Code",
                   "Exam Center",
                   "Room",
                   "Seat",
@@ -311,13 +316,13 @@ export default function StudentsPage() {
             <tbody>
               {loading ? (
                 <tr>
-                  <td colSpan={8} className="px-4 py-6 text-sm text-slate-500">
+                  <td colSpan={13} className="px-4 py-6 text-sm text-slate-500">
                     Loading...
                   </td>
                 </tr>
               ) : rows.length === 0 ? (
                 <tr>
-                  <td colSpan={8} className="px-4 py-6 text-sm text-slate-500">
+                  <td colSpan={13} className="px-4 py-6 text-sm text-slate-500">
                     No students found.
                   </td>
                 </tr>
@@ -325,10 +330,25 @@ export default function StudentsPage() {
                 rows.map((row) => (
                   <tr key={row.id} className="border-t border-slate-100">
                     <td className="px-4 py-3 text-sm text-slate-900">{row.rollno}</td>
+                    <td className="px-4 py-3 text-sm text-slate-700">
+                      {row.enrollment_number || "-"}
+                    </td>
                     <td className="px-4 py-3 text-sm text-slate-900">{row.name}</td>
                     <td className="px-4 py-3 text-sm text-slate-700">{row.class_name}</td>
                     <td className="px-4 py-3 text-sm text-slate-700">
                       {row.display_school}
+                    </td>
+                    <td className="px-4 py-3 text-sm text-slate-700">
+                      {row.exam_date || "-"}
+                    </td>
+                    <td className="px-4 py-3 text-sm text-slate-700">
+                      {row.exam_shift || "-"}
+                    </td>
+                    <td className="px-4 py-3 text-sm text-slate-700">
+                      {row.dob || "-"}
+                    </td>
+                    <td className="px-4 py-3 text-sm text-slate-700">
+                      {row.exam_center_code || row.center_code || "-"}
                     </td>
                     <td className="px-4 py-3 text-sm text-slate-700">
                       {row.display_center}

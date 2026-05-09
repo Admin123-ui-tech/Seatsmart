@@ -137,6 +137,7 @@ const rateLimitStore = new Map();
 let collegesColumnsPromise = null;
 let examCentersColumnsPromise = null;
 let roomsColumnsPromise = null;
+let studentsColumnsPromise = null;
 
 function buildCorsHeaders(req) {
   const origin = safeText(req?.headers?.origin);
@@ -283,6 +284,52 @@ async function getRoomsColumns() {
       });
   }
   return roomsColumnsPromise;
+}
+
+async function getStudentsColumns() {
+  if (!studentsColumnsPromise) {
+    studentsColumnsPromise = pool
+      .query(
+        `SELECT column_name
+         FROM information_schema.columns
+         WHERE table_schema = 'public' AND table_name = 'students'`,
+      )
+      .then((result) =>
+        new Set(
+          (result.rows || []).map((row) =>
+            safeText(row.column_name).toLowerCase(),
+          ),
+        ),
+      )
+      .catch((error) => {
+        studentsColumnsPromise = null;
+        throw error;
+      });
+  }
+  return studentsColumnsPromise;
+}
+
+function normalizeDateOnly(value) {
+  if (value === undefined || value === null) return null;
+  const raw = safeText(value);
+  if (!raw) return null;
+
+  if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) {
+    return raw;
+  }
+
+  const ddmmyyyy = raw.match(/^(\d{2})[\/\-](\d{2})[\/\-](\d{4})$/);
+  if (ddmmyyyy) {
+    return `${ddmmyyyy[3]}-${ddmmyyyy[2]}-${ddmmyyyy[1]}`;
+  }
+
+  const date = new Date(raw);
+  if (Number.isNaN(date.getTime())) return null;
+
+  const year = date.getUTCFullYear();
+  const month = String(date.getUTCMonth() + 1).padStart(2, "0");
+  const day = String(date.getUTCDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
 }
 
 function mapDatabaseError(error, fallbackMessage) {
@@ -808,6 +855,21 @@ function normalizeRoomInput(body) {
 }
 
 function normalizeStudentRow(raw) {
+  const rollno = safeText(
+    raw.rollno ||
+      raw.enrollment_number ||
+      raw.enrollmentNumber ||
+      raw.enrolment_number ||
+      raw.enrolmentNumber,
+  );
+  const enrollmentNumber = safeText(
+    raw.enrollment_number ||
+      raw.enrollmentNumber ||
+      raw.enrolment_number ||
+      raw.enrolmentNumber ||
+      rollno,
+  );
+
   return {
     id: normalizeUuid(raw.id),
     college_id: normalizeUuid(raw.college_id || raw.collegeId),
@@ -815,12 +877,19 @@ function normalizeStudentRow(raw) {
       raw.center_id || raw.centerId || raw.exam_center_id || raw.examCenterId,
     ),
     room_id: normalizeUuid(raw.room_id || raw.roomId),
-    rollno: safeText(raw.rollno),
+    rollno,
+    enrollment_number: enrollmentNumber || null,
     name: safeText(raw.name),
     room: safeText(raw.room),
     seat: safeText(raw.seat),
     school_name: safeText(raw.school_name),
     exam_center: safeText(raw.exam_center),
+    exam_center_code: safeText(
+      raw.exam_center_code || raw.examCenterCode || raw.center_code || raw.centerCode,
+    ),
+    exam_date: normalizeDateOnly(raw.exam_date || raw.examDate),
+    exam_shift: safeText(raw.exam_shift || raw.examShift),
+    dob: normalizeDateOnly(raw.dob),
     class_name: safeText(raw.class_name),
   };
 }
@@ -845,14 +914,23 @@ function buildStudentsFilter(input) {
     params.push(`%${input.search}%`);
     const idx = params.length;
     clauses.push(
-      `(s.rollno ILIKE $${idx} OR s.name ILIKE $${idx} OR COALESCE(c.name, s.school_name, '') ILIKE $${idx} OR COALESCE(ec.name, s.exam_center, '') ILIKE $${idx} OR s.class_name ILIKE $${idx})`,
+      `(s.rollno ILIKE $${idx}
+        OR COALESCE(s.enrollment_number, '') ILIKE $${idx}
+        OR s.name ILIKE $${idx}
+        OR COALESCE(c.name, s.school_name, '') ILIKE $${idx}
+        OR COALESCE(ec.name, s.exam_center, '') ILIKE $${idx}
+        OR COALESCE(ec.code, s.exam_center_code, '') ILIKE $${idx}
+        OR s.class_name ILIKE $${idx})`,
     );
   }
 
   if (input.center) {
     params.push(input.center);
     const idx = params.length;
-    clauses.push(`LOWER(COALESCE(ec.name, s.exam_center, '')) = LOWER($${idx})`);
+    clauses.push(
+      `(LOWER(COALESCE(ec.name, s.exam_center, '')) = LOWER($${idx})
+        OR LOWER(COALESCE(ec.code, s.exam_center_code, '')) = LOWER($${idx}))`,
+    );
   }
 
   if (input.school) {
@@ -1906,10 +1984,15 @@ async function handleStudents(req, res, url) {
       s.center_id,
       s.room_id,
       s.rollno,
+      s.enrollment_number,
       s.name,
       s.class_name,
       s.school_name,
       s.exam_center,
+      s.exam_center_code,
+      s.exam_date,
+      s.exam_shift,
+      s.dob,
       s.room,
       s.seat,
       s.created_at,
@@ -1935,6 +2018,7 @@ async function handleStudents(req, res, url) {
   const rows = (result.rows || []).map((row) => ({
     ...row,
     exam_center_id: row.center_id,
+    display_rollno: row.enrollment_number || row.rollno || "-",
     display_school: row.college_name || row.school_name || "-",
     display_center: row.center_name || row.exam_center || "-",
     display_room: row.room || "-",
@@ -1952,25 +2036,28 @@ async function handleStudents(req, res, url) {
 async function resolveCenter(client, row, fallbackCenterId) {
   let centerId = row.center_id || fallbackCenterId || null;
   let centerName = row.exam_center || "";
+  let centerCode = row.exam_center_code || "";
 
   if (!centerId && centerName) {
     const centerByName = await client.query(
-      `SELECT id, name FROM exam_centers WHERE LOWER(name) = LOWER($1) LIMIT 1`,
+      `SELECT id, name, code FROM exam_centers WHERE LOWER(name) = LOWER($1) LIMIT 1`,
       [centerName],
     );
     centerId = centerByName.rows[0]?.id || null;
     centerName = centerByName.rows[0]?.name || centerName;
+    centerCode = centerByName.rows[0]?.code || centerCode;
   }
 
-  if (centerId && !centerName) {
+  if (centerId && (!centerName || !centerCode)) {
     const centerById = await client.query(
-      `SELECT name FROM exam_centers WHERE id = $1::uuid LIMIT 1`,
+      `SELECT name, code FROM exam_centers WHERE id = $1::uuid LIMIT 1`,
       [centerId],
     );
     centerName = centerById.rows[0]?.name || "";
+    centerCode = centerById.rows[0]?.code || centerCode;
   }
 
-  return { centerId, centerName };
+  return { centerId, centerName, centerCode };
 }
 
 async function resolveRoomId(client, centerId, roomNo) {
@@ -1988,22 +2075,29 @@ async function upsertStudent(client, row, fallbackIds = {}) {
   const resolved = await resolveCenter(client, row, fallbackIds.center_id || null);
   const centerId = resolved.centerId;
   const centerName = resolved.centerName || row.exam_center;
+  const centerCode = row.exam_center_code || resolved.centerCode || null;
   const roomId = row.room_id || (await resolveRoomId(client, centerId, row.room));
 
   await client.query(
     `INSERT INTO students (
       college_id, center_id, room_id,
-      rollno, name, room, seat, school_name, exam_center, class_name
-    ) VALUES ($1::uuid,$2::uuid,$3::uuid,$4,$5,$6,$7,$8,$9,$10)
+      rollno, enrollment_number, name, room, seat,
+      school_name, exam_center, exam_center_code, exam_date, exam_shift, dob, class_name
+    ) VALUES ($1::uuid,$2::uuid,$3::uuid,$4,$5,$6,$7,$8,$9,$10,$11,$12::date,$13,$14::date,$15)
     ON CONFLICT (rollno, exam_center)
     DO UPDATE SET
       college_id = EXCLUDED.college_id,
       center_id = EXCLUDED.center_id,
       room_id = EXCLUDED.room_id,
+      enrollment_number = EXCLUDED.enrollment_number,
       name = EXCLUDED.name,
       room = EXCLUDED.room,
       seat = EXCLUDED.seat,
       school_name = EXCLUDED.school_name,
+      exam_center_code = EXCLUDED.exam_center_code,
+      exam_date = EXCLUDED.exam_date,
+      exam_shift = EXCLUDED.exam_shift,
+      dob = EXCLUDED.dob,
       class_name = EXCLUDED.class_name,
       updated_at = now()`,
     [
@@ -2011,11 +2105,16 @@ async function upsertStudent(client, row, fallbackIds = {}) {
       centerId,
       roomId,
       row.rollno,
+      row.enrollment_number || row.rollno || null,
       row.name,
       row.room,
       row.seat,
       row.school_name,
       centerName,
+      centerCode,
+      row.exam_date || null,
+      row.exam_shift || null,
+      row.dob || null,
       row.class_name,
     ],
   );
@@ -2199,12 +2298,17 @@ async function handleStudentUpdate(req, res) {
            center_id = $3::uuid,
            room_id = $4::uuid,
            rollno = $5,
-           name = $6,
-           class_name = $7,
-           school_name = $8,
-           exam_center = $9,
-           room = $10,
-           seat = $11,
+           enrollment_number = $6,
+           name = $7,
+           class_name = $8,
+           school_name = $9,
+           exam_center = $10,
+           exam_center_code = $11,
+           exam_date = $12::date,
+           exam_shift = $13,
+           dob = $14::date,
+           room = $15,
+           seat = $16,
            updated_at = now()
        WHERE id = $1::uuid
        RETURNING *`,
@@ -2214,10 +2318,15 @@ async function handleStudentUpdate(req, res) {
         resolved.centerId,
         roomId,
         row.rollno,
+        row.enrollment_number || row.rollno || null,
         row.name,
         row.class_name,
         row.school_name,
         resolved.centerName || row.exam_center,
+        row.exam_center_code || resolved.centerCode || null,
+        row.exam_date || null,
+        row.exam_shift || null,
+        row.dob || null,
         row.room,
         row.seat,
       ],
@@ -2263,6 +2372,7 @@ async function handleStudentDelete(req, res) {
 async function handleStudentSeat(req, res, url) {
   const rollno = safeText(url.searchParams.get("rollno"));
   const center = safeText(url.searchParams.get("center"));
+  const centerCode = safeText(url.searchParams.get("centerCode"));
   const centerId = normalizeUuid(url.searchParams.get("centerId"));
   const authUserId = safeText(req.studentUser?.id);
 
@@ -2292,10 +2402,15 @@ async function handleStudentSeat(req, res, url) {
   let query = `
     SELECT
       s.rollno,
+      s.enrollment_number,
       s.name,
       s.class_name,
       COALESCE(c.name, s.school_name) AS school_name,
       COALESCE(ec.name, s.exam_center) AS exam_center,
+      COALESCE(ec.code, s.exam_center_code) AS exam_center_code,
+      s.exam_date,
+      s.exam_shift,
+      s.dob,
       s.room,
       s.seat
     FROM students s
@@ -2314,6 +2429,14 @@ async function handleStudentSeat(req, res, url) {
     query += ` AND LOWER(COALESCE(ec.name, s.exam_center, '')) = $${params.length}`;
   }
 
+  if (centerCode) {
+    params.push(centerCode.toLowerCase());
+    query += ` AND (
+      LOWER(COALESCE(ec.code, '')) = $${params.length}
+      OR LOWER(COALESCE(s.exam_center_code, '')) = $${params.length}
+    )`;
+  }
+
   query += " ORDER BY s.updated_at DESC NULLS LAST, s.created_at DESC LIMIT 1";
 
   const result = await pool.query(query, params);
@@ -2325,6 +2448,169 @@ async function handleStudentSeat(req, res, url) {
   }
 
   json(res, 200, { student: result.rows[0] });
+}
+
+async function handleStudentQuickCheck(req, res) {
+  if (
+    !enforceRateLimit(
+      req,
+      res,
+      "student-quick-check",
+      60_000,
+      STUDENT_SEAT_RATE_LIMIT_MAX,
+      "Too many quick check attempts. Please wait a minute and try again.",
+    )
+  ) {
+    return;
+  }
+
+  const body = await readBody(req);
+  if (!isObject(body)) {
+    json(res, 400, { error: "Invalid request body." });
+    return;
+  }
+
+  const studentsColumns = await getStudentsColumns();
+  const hasExamDate = studentsColumns.has("exam_date");
+  const hasExamShift = studentsColumns.has("exam_shift");
+  const hasEnrollmentNumber = studentsColumns.has("enrollment_number");
+  const hasExamCenterCode = studentsColumns.has("exam_center_code");
+  const hasDob = studentsColumns.has("dob");
+
+  const mode = safeText(body.mode).toLowerCase() === "optional" ? "optional" : "essential";
+  const rollInput = safeText(
+    body.rollno ||
+      body.enrollment_number ||
+      body.enrollmentNumber ||
+      body.enrolment_number ||
+      body.enrolmentNumber,
+  );
+  const centerToken = safeText(
+    body.exam_center_code ||
+      body.examCenterCode ||
+      body.centerCode ||
+      body.center ||
+      body.exam_center,
+  );
+  const examDate = normalizeDateOnly(body.exam_date || body.examDate);
+  const examShift = safeText(body.exam_shift || body.examShift);
+  const name = safeText(body.name);
+  const dob = normalizeDateOnly(body.dob);
+
+  if (!rollInput) {
+    json(res, 400, { error: "Enrollment Number / Roll No is required." });
+    return;
+  }
+
+  if (!centerToken) {
+    json(res, 400, { error: "Exam Centre Code is required." });
+    return;
+  }
+
+  if (hasExamDate && !examDate) {
+    json(res, 400, { error: "Exam Date is required." });
+    return;
+  }
+
+  if (mode === "optional" && !name) {
+    json(res, 400, { error: "Name is required for optional verification." });
+    return;
+  }
+
+  const params = [rollInput.toLowerCase()];
+  let query = `
+    SELECT
+      s.rollno,
+      ${hasEnrollmentNumber ? "s.enrollment_number" : "NULL::text AS enrollment_number"},
+      s.name,
+      s.class_name,
+      COALESCE(c.name, s.school_name) AS school_name,
+      COALESCE(ec.name, s.exam_center) AS exam_center,
+      ${
+        hasExamCenterCode
+          ? "COALESCE(ec.code, s.exam_center_code) AS exam_center_code"
+          : "ec.code AS exam_center_code"
+      },
+      ${hasExamDate ? "s.exam_date" : "NULL::date AS exam_date"},
+      ${hasExamShift ? "s.exam_shift" : "NULL::text AS exam_shift"},
+      ${hasDob ? "s.dob" : "NULL::date AS dob"},
+      s.room,
+      s.seat
+    FROM students s
+    LEFT JOIN colleges c ON c.id = s.college_id
+    LEFT JOIN exam_centers ec ON ec.id = s.center_id
+    WHERE (
+      LOWER(s.rollno) = $1
+      ${
+        hasEnrollmentNumber
+          ? "OR LOWER(COALESCE(s.enrollment_number, '')) = $1"
+          : ""
+      }
+    )
+  `;
+
+  params.push(centerToken.toLowerCase());
+  const centerParamIndex = params.length;
+  const centerConditions = [
+    `LOWER(COALESCE(ec.code, '')) = $${centerParamIndex}`,
+    `LOWER(COALESCE(ec.name, s.exam_center, '')) = $${centerParamIndex}`,
+    `LOWER(COALESCE(s.exam_center, '')) = $${centerParamIndex}`,
+  ];
+  if (hasExamCenterCode) {
+    centerConditions.push(
+      `LOWER(COALESCE(s.exam_center_code, '')) = $${centerParamIndex}`,
+    );
+  }
+  query += ` AND (${centerConditions.join(" OR ")})`;
+
+  if (hasExamDate && examDate) {
+    params.push(examDate);
+    query += ` AND s.exam_date = $${params.length}::date`;
+  }
+
+  if (mode === "optional") {
+    params.push(name.toLowerCase());
+    query += ` AND LOWER(s.name) = $${params.length}`;
+
+    if (hasExamShift && examShift) {
+      params.push(examShift.toLowerCase());
+      query += ` AND LOWER(COALESCE(s.exam_shift, '')) = $${params.length}`;
+    }
+
+    if (hasDob && dob) {
+      params.push(dob);
+      query += ` AND s.dob = $${params.length}::date`;
+    }
+  }
+
+  query += " ORDER BY s.updated_at DESC NULLS LAST, s.created_at DESC LIMIT 25";
+
+  const result = await pool.query(query, params);
+  const rows = result.rows || [];
+
+  if (rows.length === 0) {
+    json(res, 404, {
+      error: "No seating details found. Please check your details.",
+    });
+    return;
+  }
+
+  if (rows.length > 1) {
+    json(res, 200, {
+      status: "multiple",
+      needsOptional: true,
+      message:
+        mode === "optional"
+          ? "Multiple records still found. Please refine optional details."
+          : "Multiple records found. Please enter optional details to verify.",
+    });
+    return;
+  }
+
+  json(res, 200, {
+    status: "matched",
+    student: rows[0],
+  });
 }
 
 async function handleGenerateSeatingPlan(req, res) {
@@ -3513,6 +3799,10 @@ async function route(req, res) {
 
     if (req.method === "GET" && pathname === "/api/student-seat") {
       await handleStudentSeat(req, res, url);
+      return;
+    }
+    if (req.method === "POST" && pathname === "/api/student-seat/quick-check") {
+      await handleStudentQuickCheck(req, res);
       return;
     }
 

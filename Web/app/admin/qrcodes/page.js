@@ -65,7 +65,11 @@ export default function QRCodesPage() {
       const entries = await Promise.all(
         centers.map(async (center) => {
           const centerValue = center.name || center.center_name || "";
-          const link = `${baseUrl}/student?center=${encodeURIComponent(centerValue)}`;
+          const centerCode = center.code || center.center_code || "";
+          const query = centerCode
+            ? `centerCode=${encodeURIComponent(centerCode)}`
+            : `center=${encodeURIComponent(centerValue)}`;
+          const link = `${baseUrl}/student?${query}`;
           const dataUrl = await QRCode.toDataURL(link, { width: 240, margin: 1 });
           return [center.id, { link, dataUrl }];
         }),

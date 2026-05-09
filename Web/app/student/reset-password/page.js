@@ -12,9 +12,12 @@ function StudentResetPasswordContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const center = searchParams.get("center") || "";
+  const centerCode = searchParams.get("centerCode") || "";
   const centerId = searchParams.get("centerId") || "";
   const forwardQuery = center
     ? `?center=${encodeURIComponent(center)}`
+    : centerCode
+      ? `?centerCode=${encodeURIComponent(centerCode)}`
     : centerId
       ? `?centerId=${encodeURIComponent(centerId)}`
       : "";

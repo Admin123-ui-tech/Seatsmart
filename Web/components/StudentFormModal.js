@@ -5,10 +5,15 @@ import { useEffect, useState } from "react";
 const emptyForm = {
   id: "",
   rollno: "",
+  enrollment_number: "",
   name: "",
   class_name: "",
   school_name: "",
   exam_center: "",
+  exam_center_code: "",
+  exam_date: "",
+  exam_shift: "",
+  dob: "",
   room: "",
   seat: "",
   college_id: "",
@@ -53,6 +58,7 @@ export default function StudentFormModal({
 
     await onSave({
       ...form,
+      enrollment_number: form.enrollment_number || form.rollno || "",
       school_name: form.school_name || selectedCollege?.name || "",
       exam_center: form.exam_center || selectedCenter?.name || "",
       college_id: form.college_id || undefined,
@@ -83,6 +89,16 @@ export default function StudentFormModal({
                 required
                 value={form.rollno}
                 onChange={(e) => update("rollno", e.target.value)}
+                className="w-full border border-slate-300 rounded-lg px-3 py-2"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-1">
+                Enrollment Number (Optional)
+              </label>
+              <input
+                value={form.enrollment_number}
+                onChange={(e) => update("enrollment_number", e.target.value)}
                 className="w-full border border-slate-300 rounded-lg px-3 py-2"
               />
             </div>
@@ -121,12 +137,54 @@ export default function StudentFormModal({
             </div>
             <div>
               <label className="block text-sm font-medium text-slate-700 mb-1">
+                Exam Date (Optional)
+              </label>
+              <input
+                type="date"
+                value={form.exam_date || ""}
+                onChange={(e) => update("exam_date", e.target.value)}
+                className="w-full border border-slate-300 rounded-lg px-3 py-2"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-1">
+                Exam Shift (Optional)
+              </label>
+              <input
+                value={form.exam_shift || ""}
+                onChange={(e) => update("exam_shift", e.target.value)}
+                className="w-full border border-slate-300 rounded-lg px-3 py-2"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-1">
+                DOB (Optional)
+              </label>
+              <input
+                type="date"
+                value={form.dob || ""}
+                onChange={(e) => update("dob", e.target.value)}
+                className="w-full border border-slate-300 rounded-lg px-3 py-2"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-1">
                 Exam Center
               </label>
               <input
                 required
                 value={form.exam_center}
                 onChange={(e) => update("exam_center", e.target.value)}
+                className="w-full border border-slate-300 rounded-lg px-3 py-2"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-1">
+                Exam Center Code (Optional)
+              </label>
+              <input
+                value={form.exam_center_code || ""}
+                onChange={(e) => update("exam_center_code", e.target.value)}
                 className="w-full border border-slate-300 rounded-lg px-3 py-2"
               />
             </div>
